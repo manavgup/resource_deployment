@@ -1,0 +1,60 @@
+/* Dashboard styles */
+.filters-panel {
+    background-color: #f8f9fa;
+    padding: 15px;
+    border-radius: 5px;
+    margin-bottom: 20px;
+}
+
+.chart-container {
+    height: 500px;
+    margin-bottom: 30px;
+}
+
+.account-detail-panel {
+    background-color: #f0f0f0;
+    padding: 15px;
+    border-radius: 5px;
+    margin-top: 20px;
+}
+
+.loading {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 200px;
+    font-size: 18px;
+    color: #6c757d;
+}
+
+.btn-filter {
+    margin-top: 30px;
+}
+
+/* Debug information */
+.debug-info {
+    padding: 10px;
+    margin-top: 20px;
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 5px;
+    font-family: monospace;
+    font-size: 12px;
+}
+
+/* Tooltip styles */
+.tooltip-inner {
+    max-width: 300px;
+    text-align: left;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .btn-filter {
+        margin-top: 10px;
+    }
+    
+    .chart-container {
+        height: 400px;
+    }
+}

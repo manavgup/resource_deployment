@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel Viewer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.sheetjs.com/xlsx-0.19.3/package/dist/xlsx.full.min.js"></script>
+    <style>
+        #output {
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 5px;
+            min-height: 200px;
+        }
+        #loader {
+            display: none;
+            margin-top: 20px;
+        }
+        .debug-log {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <h1>Excel File Viewer</h1>
+        
+        <div class="row">
+            <div class="col-md-6">
+                <div class="mb-3">
+                    <label for="excelFile" class="form-label">Select Excel File</label>
+                    <input class="form-control" type="file" id="excelFile" accept=".xlsx,.xls">
+                </div>
+                
+                <button id="loadBtn" class="btn btn-primary">Load File</button>
+                <button id="showDebugBtn" class="btn btn-secondary ms-2">Toggle Debug Log</button>
+                
+                <div id="loader" class="text-center">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p>Processing file, please wait...</p>
+                </div>
+            </div>
+            
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>File Information</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="fileInfo">
+                            <p>No file loaded yet.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row mt-4">
+            <div class="col-12">
+                <h3>Data Preview</h3>
+                <div id="output">
+                    <p>Load a file to see data preview.</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row mt-4">
+            <div class="col-12">
+                <div id="debugLog" class="debug-log" style="display: none;"></div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Simple utility for logging
+        function log(message) {
+            console.log(message);
+            const debugLog = document.getElementById('debugLog');
+            if (debugLog) {
+                const timestamp = new Date().toLocaleTimeString();
+                debugLog.innerHTML += `<div>[${timestamp}] ${message}</div>`;
+                debugLog.scrollTop = debugLog.scrollHeight;
+            }
+        }
+        
+        // Handle file loading
+        document.getElementById('loadBtn').addEventListener('click', function() {
+            const fileInput = document.getElementById('excelFile');
+            if (fileInput.files.length === 0) {
+                alert('Please select a file first.');
+                return;
+            }
+            
+            const file = fileInput.files[0];
+            document.getElementById('loader').style.display = 'block';
+            
+            log(`Loading file: ${file.name}`);
+            
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    
+                    log(`Workbook loaded with ${workbook.SheetNames.length} sheets`);
+                    log(`Sheet names: ${workbook.SheetNames.join(', ')}`);
+                    
+                    processExcel(workbook);
+                } catch (error) {
+                    log(`Error loading Excel file: ${error.message}`);
+                    alert(`Error loading file: ${error.message}`);
+                } finally {
+                    document.getElementById('loader').style.display = 'none';
+                }
+            };
+            
+            reader.onerror = function() {
+                log('Failed to read file');
+                alert('Failed to read file');
+                document.getElementById('loader').style.display = 'none';
+            };
+            
+            reader.readAsArrayBuffer(file);
+        });
+        
+        // Process Excel workbook
+        function processExcel(workbook) {
+            // Get basic file information
+            const fileInfo = document.getElementById('fileInfo');
+            fileInfo.innerHTML = `
+                <p><strong>File loaded successfully!</strong></p>
+                <p><strong>Sheets:</strong> ${workbook.SheetNames.length}</p>
+                <p><strong>Sheet Names:</strong> ${workbook.SheetNames.join(', ')}</p>
+            `;
+            
+            // Get preview of first sheet
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
+            
+            // Convert to JSON with headers
+            const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+            
+            // Get header row
+            const headerRow = data[0] || [];
+            log(`First sheet has ${data.length} rows and approximately ${headerRow.length} columns`);
+            
+            // Find SLM and FLM columns in the header
+            const slmCols = [];
+            const flmCols = [];
+            headerRow.forEach((cell, index) => {
+                if (cell && typeof cell === 'string') {
+                    if (cell.includes('SLM')) {
+                        slmCols.push(index);
+                        log(`Found SLM column at index ${index}: ${cell}`);
+                    } else if (cell.includes('FLM')) {
+                        flmCols.push(index);
+                        log(`Found FLM column at index ${index}: ${cell}`);
+                    }
+                }
+            });
+            
+            log(`Found ${slmCols.length} SLM columns and ${flmCols.length} FLM columns`);
+            
+            // Generate a basic preview table
+            let previewHtml = `
+                <h4>Preview of First 5 Rows (Sheet: ${firstSheetName})</h4>
+                <div class="table-responsive">
+                    <table class="table table-striped table-sm">
+                        <thead>
+                            <tr>
+            `;
+            
+            // Add only first 10 columns for simplicity
+            const maxCols = Math.min(headerRow.length, 10);
+            for (let i = 0; i < maxCols; i++) {
+                previewHtml += `<th>${headerRow[i] || ''}</th>`;
+            }
+            
+            previewHtml += `
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+            
+            // Add first 5 data rows
+            const maxRows = Math.min(data.length, 5);
+            for (let i = 1; i < maxRows; i++) {
+                const row = data[i] || [];
+                previewHtml += '<tr>';
+                
+                for (let j = 0; j < maxCols; j++) {
+                    previewHtml += `<td>${row[j] || ''}</td>`;
+                }
+                
+                previewHtml += '</tr>';
+            }
+            
+            previewHtml += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            
+            // Add a count of SLM/FLM pairs
+            previewHtml += `
+                <h4>Hierarchy Information</h4>
+                <p>Found ${slmCols.length} SLM columns and ${flmCols.length} FLM columns.</p>
+                <p>First SLM column value: "${headerRow[slmCols[0]] || 'N/A'}" at position ${slmCols[0]}</p>
+                <p>First FLM column value: "${headerRow[flmCols[0]] || 'N/A'}" at position ${flmCols[0]}</p>
+            `;
+            
+            // Show preview
+            document.getElementById('output').innerHTML = previewHtml;
+            
+            // Count data in the file
+            countPersonnel(workbook);
+        }
+        
+        // Count personnel in the workbook
+        function countPersonnel(workbook) {
+            let totalPersonnel = 0;
+            let accountCounts = {};
+            
+            workbook.SheetNames.forEach(sheetName => {
+                const worksheet = workbook.Sheets[sheetName];
+                const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                
+                // Skip if not enough rows
+                if (data.length < 3) return;
+                
+                const headerRow = data[0] || [];
+                
+                // Process each data row (starting from row 2)
+                for (let i = 1; i < data.length; i++) {
+                    const row = data[i] || [];
+                    if (!row[1]) continue; // Skip if no account name
+                    
+                    const accountName = row[1];
+                    let rowCount = 0;
+                    
+                    // Count non-empty cells in columns that might contain personnel
+                    // Skip first 8 columns (management info)
+                    for (let j = 8; j < row.length; j++) {
+                        if (row[j] && typeof row[j] === 'string' && 
+                            !['TBD', 'N/A', 'None', 'Select', '-', '--', '---'].includes(row[j].trim())) {
+                            // Count each name in cells with multiple names
+                            const cell = row[j].trim();
+                            if (cell.includes(',') || cell.includes('/')) {
+                                let names = [];
+                                if (cell.includes(',')) {
+                                    names = cell.split(',').map(n => n.trim()).filter(n => n);
+                                } else {
+                                    names = cell.split('/').map(n => n.trim()).filter(n => n);
+                                }
+                                rowCount += names.length;
+                            } else {
+                                rowCount++;
+                            }
+                        }
+                    }
+                    
+                    // Add to account counts
+                    accountCounts[accountName] = (accountCounts[accountName] || 0) + rowCount;
+                    totalPersonnel += rowCount;
+                }
+            });
+            
+            // Convert to sorted array
+            const sortedAccounts = Object.entries(accountCounts)
+                .sort((a, b) => b[1] - a[1]);
+            
+            // Display top accounts
+            let countHtml = `
+                <h4>Personnel Count</h4>
+                <p><strong>Total Personnel:</strong> ${totalPersonnel}</p>
+                <p><strong>Total Accounts:</strong> ${Object.keys(accountCounts).length}</p>
+                
+                <h5>Top 10 Accounts by Personnel Count</h5>
+                <div class="table-responsive">
+                    <table class="table table-striped table-sm">
+                        <thead>
+                            <tr>
+                                <th>Account</th>
+                                <th>Personnel Count</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+            
+            // Add top 10 accounts
+            const top10 = sortedAccounts.slice(0, 10);
+            top10.forEach(([account, count]) => {
+                countHtml += `
+                    <tr>
+                        <td>${account}</td>
+                        <td>${count}</td>
+                    </tr>
+                `;
+            });
+            
+            countHtml += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            
+            // Append to output
+            document.getElementById('output').innerHTML += countHtml;
+        }
+        
+        // Toggle debug log
+        document.getElementById('showDebugBtn').addEventListener('click', function() {
+            const debugLog = document.getElementById('debugLog');
+            if (debugLog.style.display === 'none') {
+                debugLog.style.display = 'block';
+            } else {
+                debugLog.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
