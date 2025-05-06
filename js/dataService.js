@@ -7,10 +7,11 @@ const dataService = {
     rawData: [],
 
     // Processed data
-    accountCounts: {},
-    brandByAccount: {},
-    accountFTE: {},
-    brandFTEByAccount: {},
+    accountCounts: {}, // Raw row counts per account
+    brandByAccount: {}, // Raw row counts per brand within account
+    accountFTE: {}, // FTE sum per account
+    brandFTEByAccount: {}, // FTE sum per brand within account
+    accountUniquePeopleCount: {}, // Count of unique people per account
     personAllocations: {},
 
     // Filter options
@@ -57,12 +58,57 @@ const dataService = {
                 console.log(`[LOG] Exiting dataService.loadExcelFile (with error)`); // Added Log
                 // Re-throw to propagate the error up the promise chain
                 throw error;
-            });
-    },
-
-    /**
-     * Process raw data to calculate counts and FTE allocations
-     */
+             });
+     },
+ 
+     /**
+      * Load data directly from a JSON array (e.g., pre-loaded sample data)
+      * @param {Array} jsonData - Array of data objects matching the expected structure
+      * @returns {boolean} True if data was loaded and processed, false otherwise
+      */
+     loadJsonData: function(jsonData) {
+         console.log(`[LOG] Entering dataService.loadJsonData with ${jsonData.length} records.`); // Added Log
+         if (!jsonData || !Array.isArray(jsonData) || jsonData.length === 0) {
+             console.error("[LOG] Invalid or empty JSON data provided to loadJsonData.");
+             return false;
+         }
+ 
+         try {
+             // Set rawData
+             this.rawData = jsonData;
+             console.log(`[LOG] Set rawData from JSON.`);
+ 
+             // Process the data (calculates FTE, counts, etc.)
+             console.log("[LOG] Calling dataService.processData from loadJsonData..."); // Added Log
+             this.processData();
+             console.log(`[LOG] dataService.processData finished. Processed data into ${Object.keys(this.accountCounts).length} accounts`); // Added Log
+ 
+             // Extract filter options
+             console.log("[LOG] Calling dataService.extractFilterOptions from loadJsonData..."); // Added Log
+             this.extractFilterOptions();
+             console.log(`[LOG] dataService.extractFilterOptions finished. Extracted filter options: ${this.filterOptions.brands.length} brands, ${this.filterOptions.accounts.length} accounts`); // Added Log
+ 
+             console.log(`[LOG] Exiting dataService.loadJsonData (success)`); // Added Log
+             return true; // Indicate success
+         } catch (error) {
+             console.error("[LOG] Error processing JSON data in loadJsonData:", error);
+             // Reset data potentially?
+             this.rawData = [];
+             this.accountCounts = {};
+             this.brandByAccount = {};
+             this.accountFTE = {};
+             this.brandFTEByAccount = {};
+             this.accountUniquePeopleCount = {};
+             this.personAllocations = {};
+             this.filterOptions = { brands: [], accounts: [], slms: [], flms: [] };
+             console.log(`[LOG] Exiting dataService.loadJsonData (with error)`); // Added Log
+             return false; // Indicate failure
+         }
+     },
+ 
+     /**
+      * Process raw data to calculate counts and FTE allocations
+      */
     processData: function() {
         console.log("[LOG] Entering dataService.processData"); // Added Log
 
@@ -71,6 +117,7 @@ const dataService = {
         this.brandByAccount = {};
         this.accountFTE = {};
         this.brandFTEByAccount = {};
+        this.accountUniquePeopleCount = {}; // Reset unique count
         this.personAllocations = {};
 
         // First, count how many accounts each person appears on
@@ -98,11 +145,19 @@ const dataService = {
             });
         }
 
-        // Now process the raw data to calculate counts and FTE
-        console.log("[LOG] Aggregating data for counts and FTE..."); // Added Log
+        // Now process the raw data to calculate counts, FTE, and unique people
+        console.log("[LOG] Aggregating data for counts, FTE, and unique people..."); // Added Log
+        const uniquePeoplePerAccount = {}; // Temporary structure to hold sets of people
+
         this.rawData.forEach(item => {
             const { account, brand, person } = item;
             const allocation = this.personAllocations[person];
+
+            // Initialize temporary set for unique people count if needed
+            if (!uniquePeoplePerAccount[account]) {
+                uniquePeoplePerAccount[account] = new Set();
+            }
+            uniquePeoplePerAccount[account].add(person); // Add person to the set for the account
 
             // Initialize if needed for raw counts
             if (!this.accountCounts[account]) {
@@ -130,6 +185,13 @@ const dataService = {
             }
             this.brandFTEByAccount[account][brand] += allocation;
         });
+
+        // Calculate final unique people counts from the sets
+        for (const account in uniquePeoplePerAccount) {
+            this.accountUniquePeopleCount[account] = uniquePeoplePerAccount[account].size;
+        }
+        console.log(`[LOG] Calculated unique people counts for ${Object.keys(this.accountUniquePeopleCount).length} accounts.`); // Added Log
+
         console.log("[LOG] Data aggregation finished."); // Added Log
 
 
@@ -148,8 +210,16 @@ const dataService = {
                 .sort((a, b) => b[1] - a[1])
                 .slice(0, 5);
             this.logDebug("Top 5 accounts by FTE:");
-             topAccountsFTE.forEach(([account, fte]) => {
+            topAccountsFTE.forEach(([account, fte]) => {
                 this.logDebug(`  ${account}: ${fte.toFixed(2)} FTE`);
+            });
+
+            const topAccountsUnique = Object.entries(this.accountUniquePeopleCount)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 5);
+            this.logDebug("Top 5 accounts by Unique People Count:");
+            topAccountsUnique.forEach(([account, count]) => {
+                this.logDebug(`  ${account}: ${count} unique people`);
             });
         }
 
