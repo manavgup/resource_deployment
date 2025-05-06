@@ -1,0 +1,72 @@
+window.SAMPLE_DATA = [
+  {
+    "account": "GLOBAL BANK CORP",
+    "brand": "Retail Banking",
+    "slm": "Smith, John",
+    "flm": "Doe, Jane",
+    "person": "Miller, Alice",
+    "role": "Developer",
+    "hierarchyName": "AppDev Group 1",
+    "clientType": "Tier 1"
+  },
+  {
+    "account": "GLOBAL BANK CORP",
+    "brand": "Retail Banking",
+    "slm": "Smith, John",
+    "flm": "Doe, Jane",
+    "person": "Jones, Bob",
+    "role": "Developer",
+    "hierarchyName": "AppDev Group 1",
+    "clientType": "Tier 1"
+  },
+  {
+    "account": "GLOBAL BANK CORP",
+    "brand": "Investment Banking",
+    "slm": "Smith, John",
+    "flm": "Kent, Clark",
+    "person": "Wayne, Bruce",
+    "role": "Analyst",
+    "hierarchyName": "Investment Group",
+    "clientType": "Tier 1"
+  },
+  {
+    "account": "TECH SOLUTIONS INC",
+    "brand": "Cloud Services",
+    "slm": "Davis, Mary",
+    "flm": "N/A",
+    "person": "Stark, Tony",
+    "role": "Architect",
+    "hierarchyName": "Cloud Infra",
+    "clientType": "Tier 2"
+  },
+  {
+    "account": "TECH SOLUTIONS INC",
+    "brand": "Cloud Services",
+    "slm": "Davis, Mary",
+    "flm": "N/A",
+    "person": "Banner, Bruce",
+    "role": "DevOps Engineer",
+    "hierarchyName": "Cloud Infra",
+    "clientType": "Tier 2"
+  },
+  {
+    "account": "TECH SOLUTIONS INC",
+    "brand": "AI Research",
+    "slm": "Davis, Mary",
+    "flm": "Stark, Tony",
+    "person": "Pym, Hank",
+    "role": "Researcher",
+    "hierarchyName": "AI Labs",
+    "clientType": "Tier 2"
+  },
+   {
+    "account": "GLOBAL BANK CORP",
+    "brand": "Retail Banking",
+    "slm": "Smith, John",
+    "flm": "Doe, Jane",
+    "person": "Miller, Alice",
+    "role": "QA Tester",
+    "hierarchyName": "AppDev Group 1",
+    "clientType": "Tier 1"
+  }
+];

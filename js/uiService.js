@@ -269,9 +269,9 @@ const uiService = {
              return;
         }
 
-        // Update allocation header visibility
-        allocationHeader.style.display = viewMode === 'fte' ? '' : 'none';
-         console.log(`[LOG] Allocation header display set to: ${allocationHeader.style.display}`); // Added Log
+        // Always show allocation header since we're always in FTE mode
+        allocationHeader.style.display = '';
+        console.log("[LOG] Allocation header always visible now"); // Added Log
 
         // Update result count badge
         tableBody.innerHTML = ''; // Clear existing rows
@@ -279,13 +279,14 @@ const uiService = {
          console.log(`[LOG] Updated result count to ${data.length}`); // Added Log
 
 
-        if (data.length === 0) {
-            console.log("[LOG] No results to display in table."); // Added Log
-            const row = document.createElement('tr');
-            const colSpan = viewMode === 'fte' ? 7 : 6;
-            row.innerHTML = `<td colspan="${colSpan}" class="text-center">No results found</td>`;
-            tableBody.appendChild(row);
-             console.log("[LOG] Added 'No results' row to table."); // Added Log
+         if (data.length === 0) {
+             console.log("[LOG] No results to display in table."); // Added Log
+             const row = document.createElement('tr');
+             // Adjusted colspan for the new Specialty column (7 + 1 = 8 in FTE mode)
+             const colSpan = viewMode === 'fte' ? 8 : 7;
+             row.innerHTML = `<td colspan="${colSpan}" class="text-center">No results found</td>`;
+             tableBody.appendChild(row);
+              console.log("[LOG] Added 'No results' row to table."); // Added Log
             console.log("[LOG] Exiting uiService.updateResultsTable (no results)"); // Added Log
             return;
         }
@@ -296,25 +297,16 @@ const uiService = {
         console.log(`[LOG] Displaying ${displayData.length} out of ${data.length} results (limit: ${displayLimit})`); // Added Log
 
 
-        displayData.forEach((item, index) => {
-            // console.log(`[LOG] Adding row ${index + 1}/${displayData.length} for person: ${item.person}`); // Too verbose per row
-            const row = document.createElement('tr');
-            let html = `
-                <td>${item.account || '-'}</td>
-                <td>${item.brand || '-'}</td>
-                <td>${item.slm || '-'}</td>
-                <td>${item.flm || '-'}</td>
-                <td>${item.person || '-'}</td>
-            `;
+         displayData.forEach((item, index) => {
+             // console.log(`[LOG] Adding row ${index + 1}/${displayData.length} for person: ${item.person}`); // Too verbose per row
+             const row = document.createElement('tr');
+             // Use the helper function for common cells, add Account and Actions cells
+             let html = `<td>${item.account || '-'}</td>`; // Add Account cell first
+             html += this._createPersonnelTableRowHTML(item, viewMode); // Add common cells (Brand, SLM, FLM, Person, Specialty, Allocation)
 
-            // Add allocation column if in FTE mode
-            if (viewMode === 'fte') {
-                const allocation = dataService.getAllocationForPerson(item.person);
-                html += `<td>${allocation.toFixed(2)}</td>`;
-            }
-
-            html += `
-                <td>
+             // Add Actions cell
+             html += `
+                 <td>
                     <button class="btn btn-sm btn-info" onclick="app.showAccountDetails('${item.account}')">
                         View Account
                     </button>
@@ -326,13 +318,14 @@ const uiService = {
         });
 
         // Add a note if we're limiting the display
-        if (data.length > displayLimit) {
-            console.log("[LOG] Adding display limit note to table."); // Added Log
-            const row = document.createElement('tr');
-            const colSpan = viewMode === 'fte' ? 7 : 6;
-            row.innerHTML = `<td colspan="${colSpan}" class="text-center text-muted">
-                Showing ${displayLimit} of ${data.length} results. Apply more filters to narrow down the results.
-            </td>`;
+         if (data.length > displayLimit) {
+             console.log("[LOG] Adding display limit note to table."); // Added Log
+             const row = document.createElement('tr');
+             // Adjusted colspan for the new Specialty column (7 + 1 = 8 in FTE mode)
+             const colSpan = viewMode === 'fte' ? 8 : 7;
+             row.innerHTML = `<td colspan="${colSpan}" class="text-center text-muted">
+                 Showing ${displayLimit} of ${data.length} results. Apply more filters to narrow down the results.
+             </td>`;
             tableBody.appendChild(row);
              console.log("[LOG] Display limit note added."); // Added Log
         }
@@ -359,23 +352,23 @@ const uiService = {
         }
 
 
-        // Update allocation column header visibility
+        // Always show allocation column headers
         const allocationHeader = document.getElementById('allocationHeader');
         const accountDetailAllocationHeader = document.getElementById('accountDetailAllocationHeader');
 
         if (allocationHeader) {
-            allocationHeader.style.display = viewMode === 'fte' ? '' : 'none';
-             console.log(`[LOG] Main allocation header display set to: ${allocationHeader.style.display}`); // Added Log
+            allocationHeader.style.display = '';
+            console.log("[LOG] Main allocation header always visible now"); // Added Log
         } else {
-             console.warn("[LOG] Main allocation header element not found."); // Added Warning
+            console.warn("[LOG] Main allocation header element not found."); // Added Warning
         }
 
-         if (accountDetailAllocationHeader) {
-            accountDetailAllocationHeader.style.display = viewMode === 'fte' ? '' : 'none';
-             console.log(`[LOG] Detail allocation header display set to: ${accountDetailAllocationHeader.style.display}`); // Added Log
-         } else {
-             console.warn("[LOG] Detail allocation header element not found."); // Added Warning
-         }
+        if (accountDetailAllocationHeader) {
+            accountDetailAllocationHeader.style.display = '';
+            console.log("[LOG] Detail allocation header always visible now"); // Added Log
+        } else {
+            console.warn("[LOG] Detail allocation header element not found."); // Added Warning
+        }
 
 
         // Update chart titles
@@ -409,14 +402,9 @@ const uiService = {
         console.log("[LOG] Account detail panel set to display: block."); // Added Log
 
 
-        // Update panel title
-        if (viewMode === 'raw') {
-            accountDetailTitle.textContent =
-                `${accountData.account} (${accountData.total_people} people)`;
-        } else {
-            accountDetailTitle.textContent =
-                `${accountData.account} (${accountData.total_people} people, ${accountData.total_fte.toFixed(2)} FTE)`;
-        }
+        // Always show FTE information in the account title
+        accountDetailTitle.textContent =
+            `${accountData.account} (${accountData.total_people} people, ${accountData.total_fte.toFixed(2)} FTE)`;
         console.log(`[LOG] Account detail title updated: "${accountDetailTitle.textContent}"`); // Added Log
 
 
@@ -430,34 +418,22 @@ const uiService = {
         console.log(`[LOG] Populating people table for ${accountData.account}...`); // Added Log
         accountPeopleTable.innerHTML = ''; // Clear existing rows
 
-        if (!accountData.people || accountData.people.length === 0) {
-             console.log("[LOG] No people data for this account."); // Added Log
-             const row = document.createElement('tr');
-             const colSpan = viewMode === 'fte' ? 5 : 4;
-             row.innerHTML = `<td colspan="${colSpan}" class="text-center">No personnel listed for this account.</td>`;
-             accountPeopleTable.appendChild(row);
-             console.log("[LOG] Added 'No personnel' row to detail table."); // Added Log
+         if (!accountData.people || accountData.people.length === 0) {
+              console.log("[LOG] No people data for this account."); // Added Log
+              const row = document.createElement('tr');
+              // Adjusted colspan for new Specialty column (5 + 1 = 6 in FTE mode)
+              const colSpan = viewMode === 'fte' ? 6 : 5;
+              row.innerHTML = `<td colspan="${colSpan}" class="text-center">No personnel listed for this account.</td>`;
+              accountPeopleTable.appendChild(row);
+              console.log("[LOG] Added 'No personnel' row to detail table."); // Added Log
 
         } else {
             accountData.people.forEach((person, index) => {
                  // console.log(`[LOG] Adding person ${index + 1}/${accountData.people.length}: ${person.person}`); // Too verbose per person
                 const row = document.createElement('tr');
-                let html = `
-                    <td>${person.brand || '-'}</td>
-                    <td>${person.slm || '-'}</td>
-                    <td>${person.flm || '-'}</td>
-                    <td>${person.person || '-'}</td>
-                `;
-
-                // Add allocation column if in FTE mode
-                if (viewMode === 'fte' && person.allocation !== undefined) { // Check if allocation exists
-                    html += `<td>${person.allocation.toFixed(2)}</td>`;
-                } else if (viewMode === 'fte') {
-                    html += `<td>-</td>`; // Show hyphen if FTE mode but allocation is missing
-                }
-
-                // No actions column in detail table based on index.html structure
-                // html += `<td></td>`; // Add an empty cell for structure if needed
+                // Use the helper function for common cells
+                // Note: The 'person' object here comes from getAccountDetails which includes 'allocation'
+                let html = this._createPersonnelTableRowHTML(person, viewMode);
 
                 row.innerHTML = html;
                 accountPeopleTable.appendChild(row);
@@ -563,6 +539,60 @@ const uiService = {
                 // Auto-scroll to bottom
                 debugOutput.scrollTop = debugOutput.scrollHeight;
             }
+         }
+     },
+
+    /**
+     * (Private Helper) Creates the HTML for the common cells of a personnel table row.
+     * @param {Object} personData - The data object for a single person.
+     * @param {string} viewMode - The current view mode ('fte').
+     * @returns {string} HTML string for the table cells (<td> elements).
+     */
+    _createPersonnelTableRowHTML: function(personData, viewMode) {
+        let cellsHTML = `
+            <td>${personData.brand || '-'}</td>
+            <td>${personData.slm || '-'}</td>
+            <td>${personData.flm || '-'}</td>
+            <td>${personData.person || '-'}</td>
+            <td>${personData.role || '-'}</td> <!-- Specialty/Role -->
+        `;
+
+        // Always add allocation column (we're always in FTE mode)
+        if (viewMode === 'fte') {
+            // Use allocation from personData if available (from getAccountDetails), otherwise calculate it
+            const allocation = personData.allocation !== undefined
+                                ? personData.allocation
+                                : dataService.getAllocationForPerson(personData.person);
+            cellsHTML += `<td>${allocation.toFixed(2)}</td>`;
+        } else {
+             cellsHTML += `<td>-</td>`; // Placeholder if not FTE mode (though currently always FTE)
         }
-    }
-};
+         return cellsHTML;
+     },
+ 
+     /**
+      * Shows the main dashboard container.
+      */
+     showDashboardContainer: function() {
+         const dashboardContainer = document.getElementById('dashboardContainer');
+         if (dashboardContainer) {
+             dashboardContainer.style.display = 'block';
+             console.log("[LOG] Dashboard container shown.");
+         } else {
+             console.error("[LOG] Dashboard container element not found!");
+         }
+     },
+ 
+     /**
+      * Hides the main dashboard container.
+      */
+     hideDashboardContainer: function() {
+         const dashboardContainer = document.getElementById('dashboardContainer');
+         if (dashboardContainer) {
+             dashboardContainer.style.display = 'none';
+             console.log("[LOG] Dashboard container hidden.");
+         } else {
+             console.error("[LOG] Dashboard container element not found!");
+         }
+     }
+ };

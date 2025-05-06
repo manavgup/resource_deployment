@@ -4,12 +4,12 @@
  */
 const chartService = {
     /**
-     * Create account chart showing people or FTE per account
-     * @param {Object} accountData - Map of account names to values
-     * @param {string} viewMode - 'raw' or 'fte'
+     * Create account chart showing unique people count or FTE per account
+     * @param {Object} accountData - Map of account names to values (either counts or FTE)
+     * @param {string} modeIdentifier - 'unique_count' or 'fte'
      */
-    createAccountChart: function(accountData, viewMode) {
-        console.log(`[LOG] Entering chartService.createAccountChart with viewMode: ${viewMode}`); // Added Log
+    createAccountChart: function(accountData, modeIdentifier) {
+        console.log(`[LOG] Entering chartService.createAccountChart with modeIdentifier: ${modeIdentifier}`); // Added Log
         console.log("[LOG] accountData for chart:", accountData); // Added Log
 
         // Convert to array and sort
@@ -20,28 +20,34 @@ const chartService = {
         console.log(`[LOG] Prepared ${chartData.length} data points for account chart.`); // Added Log
 
 
+        // Determine y-axis label and title based on mode
+        const isUniqueCount = modeIdentifier === 'unique_count';
+        const yAxisLabel = isUniqueCount ? 'Number of People' : 'Full-Time Equivalent (FTE)';
+        const chartTitle = isUniqueCount ? 'People Deployed Per Account' : 'Allocated FTE Per Account'; // This title might be overridden by updateChartTitles
+
         // Create Plotly data
         const data = [{
             x: chartData.map(item => item.account),
-            y: chartData.map(item => viewMode === 'fte' ? parseFloat(item.value.toFixed(2)) : item.value),
+            // Use raw value for unique count, format FTE
+            y: chartData.map(item => isUniqueCount ? item.value : parseFloat(item.value.toFixed(2))),
             type: 'bar',
             marker: {
-                color: 'rgb(158,202,225)'
+                color: 'rgb(158,202,225)' // Consider different colors?
             },
-            hovertemplate: viewMode === 'raw' ?
+            hovertemplate: isUniqueCount ?
                 'Account: %{x}<br>People: %{y}<extra></extra>' :
                 'Account: %{x}<br>FTE: %{y}<extra></extra>'
         }];
 
         // Create layout
         const layout = {
-            title: viewMode === 'raw' ? 'People Deployed Per Account' : 'Allocated FTE Per Account',
+            title: chartTitle, // Use dynamic title
             xaxis: {
                 title: 'Account',
                 tickangle: config.charts.tickAngle
             },
             yaxis: {
-                title: viewMode === 'raw' ? 'Number of People' : 'Full-Time Equivalent (FTE)'
+                title: yAxisLabel // Use dynamic label
             },
             height: config.charts.height,
             margin: {
@@ -57,13 +63,33 @@ const chartService = {
             })
             .catch(error => {
                 console.error("[LOG] Error during Plotly.newPlot for accountsChart:", error); // Added Log
+            })
+            .then(() => {
+                // Add click event listener after chart is plotted
+                const accountsChartElement = document.getElementById('accountsChart');
+                if (accountsChartElement && accountsChartElement.on) { // Check if Plotly object exists
+                    accountsChartElement.on('plotly_click', function(data) {
+                        if (data.points.length > 0) {
+                            const clickedAccount = data.points[0].x; // Get account name from x-axis
+                            console.log(`[LOG] Clicked on account chart bar: ${clickedAccount}`); // Added Log
+                            if (app && typeof app.showAccountDetails === 'function') {
+                                app.showAccountDetails(clickedAccount);
+                            } else {
+                                console.error("[LOG] app.showAccountDetails function not found!");
+                            }
+                        }
+                    });
+                    console.log("[LOG] Added plotly_click listener to accountsChart."); // Added Log
+                } else {
+                     console.warn("[LOG] Could not attach plotly_click listener to accountsChart.");
+                }
             });
 
         console.log("[LOG] Exiting chartService.createAccountChart"); // Added Log
     },
 
     /**
-     * Create technology/brand breakdown chart
+     * Create Allocated FTE Deployed per account chart
      * @param {Object} techByAccountData - Nested map of account -> technology -> value
      * @param {string} viewMode - 'raw' or 'fte'
      */
@@ -71,61 +97,46 @@ const chartService = {
         console.log(`[LOG] Entering chartService.createTechnologyChart with viewMode: ${viewMode}`); // Added Log
         console.log("[LOG] techByAccountData for chart:", techByAccountData); // Added Log
 
-        // Get unique technology areas
-        console.log("[LOG] Identifying unique technologies..."); // Added Log
-        const technologies = new Set();
-        Object.values(techByAccountData).forEach(techData => {
-            Object.keys(techData).forEach(tech => technologies.add(tech));
+        // Calculate total FTE per account
+        console.log("[LOG] Calculating total FTE per account..."); // Added Log
+        const accountFTEData = {};
+        Object.entries(techByAccountData).forEach(([account, techData]) => {
+            accountFTEData[account] = Object.values(techData).reduce((sum, val) => sum + val, 0);
         });
-        const techArray = Array.from(technologies);
-        console.log(`[LOG] Found ${techArray.length} unique technologies.`); // Added Log
+        console.log("[LOG] Calculated FTE for each account:", accountFTEData); // Added Log
 
+        // Sort accounts by FTE value (descending)
+        console.log("[LOG] Sorting accounts by FTE value..."); // Added Log
+        const sortedAccounts = Object.entries(accountFTEData)
+            .sort((a, b) => b[1] - a[1])
+            .map(entry => entry[0]);
 
-        // Sort accounts by total value (descending)
-        console.log("[LOG] Sorting accounts by total value..."); // Added Log
-        const accounts = Object.keys(techByAccountData).sort((a, b) => {
-            const totalA = Object.values(techByAccountData[a]).reduce((sum, val) => sum + val, 0);
-            const totalB = Object.values(techByAccountData[b]).reduce((sum, val) => sum + val, 0);
-            return totalB - totalA;
-        });
+        // Take top 20 accounts for clarity
+        const topAccounts = sortedAccounts.slice(0, Math.min(sortedAccounts.length, 20));
+        console.log(`[LOG] Using top ${topAccounts.length} accounts for FTE chart.`); // Added Log
 
-        // Take top 20 accounts for clarity (adjust if needed for your 54 rows)
-        const topAccounts = accounts.slice(0, Math.min(accounts.length, 20)); // Adjusted limit
-        console.log(`[LOG] Using top ${topAccounts.length} accounts for technology chart.`); // Added Log
-
-
-        // Create data for each technology area
-        console.log("[LOG] Preparing Plotly data for technology chart..."); // Added Log
-        const plotlyData = techArray.map(tech => {
-            return {
-                x: topAccounts,
-                y: topAccounts.map(account => {
-                    const value = techByAccountData[account][tech] || 0;
-                    return viewMode === 'fte' ? parseFloat(value.toFixed(2)) : value;
-                }),
-                name: tech,
-                type: 'bar',
-                marker: {
-                    color: config.colors[tech] || null
-                },
-                hovertemplate: viewMode === 'raw' ?
-                    'Account: %{x}<br>Technology: ' + tech + '<br>People: %{y}<extra></extra>' :
-                    'Account: %{x}<br>Technology: ' + tech + '<br>FTE: %{y}<extra></extra>'
-            };
-        });
-        console.log(`[LOG] Prepared ${plotlyData.length} Plotly traces for technology chart.`); // Added Log
-
+        // Create data for the chart
+        console.log("[LOG] Preparing Plotly data for FTE chart..."); // Added Log
+        const plotlyData = [{
+            x: topAccounts,
+            y: topAccounts.map(account => parseFloat(accountFTEData[account].toFixed(2))),
+            type: 'bar',
+            marker: {
+                color: 'rgb(158,202,225)'
+            },
+            hovertemplate: 'Account: %{x}<br>FTE: %{y}<extra></extra>'
+        }];
+        console.log(`[LOG] Prepared Plotly data for FTE chart.`); // Added Log
 
         // Create layout
         const layout = {
-            title: viewMode === 'raw' ? 'Technology Area Breakdown' : 'Technology Area Breakdown (FTE)',
-            barmode: 'stack',
+            title: 'Allocated FTE Deployed per account',
             xaxis: {
                 title: 'Account',
                 tickangle: config.charts.tickAngle
             },
             yaxis: {
-                title: viewMode === 'raw' ? 'Number of People' : 'Full-Time Equivalent (FTE)'
+                title: 'Full-Time Equivalent (FTE)'
             },
             height: config.charts.height,
             margin: {
@@ -134,7 +145,7 @@ const chartService = {
         };
 
         // Log for debugging
-        console.log(`[LOG] Rendering technology chart with ${plotlyData.length} technology areas and ${topAccounts.length} accounts`);
+        console.log(`[LOG] Rendering FTE chart with ${topAccounts.length} accounts`);
 
         // Plot the chart
         console.log("[LOG] Calling Plotly.newPlot for technologiesChart..."); // Added Log
@@ -144,6 +155,26 @@ const chartService = {
             })
             .catch(error => {
                 console.error("[LOG] Error during Plotly.newPlot for technologiesChart:", error); // Added Log
+            })
+             .then(() => {
+                // Add click event listener after chart is plotted
+                const techChartElement = document.getElementById('technologiesChart');
+                 if (techChartElement && techChartElement.on) { // Check if Plotly object exists
+                    techChartElement.on('plotly_click', function(data) {
+                        if (data.points.length > 0) {
+                            const clickedAccount = data.points[0].x; // Get account name from x-axis
+                            console.log(`[LOG] Clicked on technology chart bar: ${clickedAccount}`); // Added Log
+                            if (app && typeof app.showAccountDetails === 'function') {
+                                app.showAccountDetails(clickedAccount);
+                            } else {
+                                console.error("[LOG] app.showAccountDetails function not found!");
+                            }
+                        }
+                    });
+                    console.log("[LOG] Added plotly_click listener to technologiesChart."); // Added Log
+                } else {
+                     console.warn("[LOG] Could not attach plotly_click listener to technologiesChart.");
+                }
             });
 
         console.log("[LOG] Exiting chartService.createTechnologyChart"); // Added Log
@@ -208,26 +239,6 @@ const chartService = {
             });
 
         console.log("[LOG] Exiting chartService.createAccountTechChart"); // Added Log
-    },
-
-    /**
-     * Update chart titles based on view mode
-     * @param {string} viewMode - 'raw' or 'fte'
-     */
-    updateChartTitles: function(viewMode) {
-        console.log(`[LOG] Entering chartService.updateChartTitles with viewMode: ${viewMode}`); // Added Log
-        const accountsChartTitle = document.getElementById('accountsChartTitle');
-        const technologiesChartTitle = document.getElementById('technologiesChartTitle');
-
-        if (accountsChartTitle) {
-            accountsChartTitle.textContent =
-                viewMode === 'raw' ? 'People Deployed Per Account' : 'Allocated FTE Per Account';
-        }
-
-        if (technologiesChartTitle) {
-            technologiesChartTitle.textContent =
-                viewMode === 'raw' ? 'Brand Breakdown' : 'Brand Breakdown (FTE)';
-        }
-        console.log("[LOG] Exiting chartService.updateChartTitles"); // Added Log
     }
+    // Removed updateChartTitles function as titles are now set dynamically within chart creation
 };

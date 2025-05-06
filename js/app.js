@@ -3,29 +3,77 @@
  * Coordinates between data, chart, and UI services
  */
 const app = {
-    // Current view mode ('raw' or 'fte')
-    currentViewMode: 'raw',
+    // Current view mode (always 'fte' since we removed the radio buttons)
+    currentViewMode: 'fte',
 
     /**
-     * Initialize the application
-     */
-    init: function() {
-        if (config.debug) {
-            console.log("[LOG] Entering app.init"); // Added Log
-        }
+      * Initialize the application
+      * Attempts to load pre-defined sample data first.
+      */
+     init: async function() { // Make init async to handle fetch
+         if (config.debug) {
+             console.log("[LOG] Entering app.init"); // Added Log
+         }
+ 
+         // Initialize UI elements (like file input listeners) regardless of data loading
+         uiService.init();
+ 
+         // Attempt to load sample data
+         try {
+             let sampleData = null;
+             if (window.SAMPLE_DATA && Array.isArray(window.SAMPLE_DATA) && window.SAMPLE_DATA.length > 0) {
+                 console.log("[LOG] Using embedded SAMPLE_DATA for pre-loaded view.");
+                 sampleData = window.SAMPLE_DATA;
+             } else {
+                 // Fallback: try to fetch (for future-proofing, but not expected to work locally)
+                 console.log("[LOG] No embedded SAMPLE_DATA found, attempting to fetch data/sample_data.json...");
+                 const response = await fetch('data/sample_data.json');
+                 if (!response.ok) {
+                     throw new Error(`HTTP error! status: ${response.status}`);
+                 }
+                 sampleData = await response.json();
+                 console.log(`[LOG] Successfully fetched sample data (${sampleData.length} records).`);
+             }
 
-        // Initialize UI
-        uiService.init();
+             // Load the sample data using dataService
+             const loaded = dataService.loadJsonData(sampleData);
 
-        // Initialize dashboard container visibility
-        const dashboardContainer = document.getElementById('dashboardContainer');
-        if (dashboardContainer) {
-            // Initially hidden
-            dashboardContainer.style.display = 'none';
-        }
-        if (config.debug) {
-            console.log("[LOG] Exiting app.init"); // Added Log
-        }
+             if (loaded) {
+                 console.log("[LOG] Sample data loaded and processed successfully.");
+                 // Populate filters based on sample data
+                 console.log("[LOG] Calling uiService.populateFilters with sample data options...");
+                 uiService.populateFilters(dataService.filterOptions);
+                 console.log("[LOG] uiService.populateFilters finished.");
+
+                 // Refresh charts with sample data
+                 console.log("[LOG] Calling app.refreshCharts with sample data...");
+                 this.refreshCharts();
+                 console.log("[LOG] app.refreshCharts finished.");
+
+                 // Apply initial filters (show all sample data)
+                 console.log("[LOG] Calling app.applyFilters for initial sample data display...");
+                 this.applyFilters();
+                 console.log("[LOG] app.applyFilters (initial) finished.");
+
+                 // Make dashboard visible
+                 uiService.showDashboardContainer();
+
+             } else {
+                 console.warn("[LOG] Sample data present but failed to load/process in dataService.");
+                 // Keep dashboard hidden, rely on user upload
+                 uiService.hideDashboardContainer();
+             }
+
+         } catch (error) {
+             console.warn("[LOG] Failed to load or process sample data:", error);
+             // Sample data not available or failed to load, keep dashboard hidden
+             // The user will need to upload a file.
+             uiService.hideDashboardContainer();
+         }
+ 
+         if (config.debug) {
+             console.log("[LOG] Exiting app.init"); // Added Log
+         }
     },
 
     /**
@@ -69,40 +117,6 @@ const app = {
     },
 
     /**
-     * Toggle between raw count and FTE views
-     */
-    toggleCountType: function() {
-        console.log("[LOG] Entering app.toggleCountType"); // Added Log
-        const rawRadio = document.getElementById('rawCountRadio');
-        const fteRadio = document.getElementById('fteCountRadio');
-
-        // Check which radio button is selected
-        if (rawRadio && rawRadio.checked) {
-            this.currentViewMode = 'raw';
-        } else if (fteRadio && fteRadio.checked) {
-            this.currentViewMode = 'fte';
-        }
-
-        console.log(`[LOG] Switched to ${this.currentViewMode} view mode`);
-
-        // Update UI elements
-        console.log("[LOG] Calling uiService.updateViewElements..."); // Added Log
-        uiService.updateViewElements(this.currentViewMode);
-        console.log("[LOG] uiService.updateViewElements finished."); // Added Log
-
-        // Refresh charts and table
-        console.log("[LOG] Calling app.refreshCharts after toggle..."); // Added Log
-        this.refreshCharts();
-        console.log("[LOG] app.refreshCharts after toggle finished."); // Added Log
-
-        console.log("[LOG] Calling app.applyFilters after toggle..."); // Added Log
-        this.applyFilters();
-        console.log("[LOG] app.applyFilters after toggle finished."); // Added Log
-
-        console.log("[LOG] Exiting app.toggleCountType"); // Added Log
-    },
-
-    /**
      * Apply filters and update results table
      */
     applyFilters: function() {
@@ -127,29 +141,33 @@ const app = {
     },
 
     /**
-     * Refresh charts based on current view mode
+     * Refresh charts based on the processed data
      */
     refreshCharts: function() {
         console.log("[LOG] Entering app.refreshCharts"); // Added Log
         try {
-            console.log(`[LOG] Calling dataService.getDataForViewMode for ${this.currentViewMode} view mode...`); // Added Log
-            const { accountData, brandData } = dataService.getDataForViewMode(this.currentViewMode);
-            console.log(`[LOG] dataService.getDataForViewMode finished. Account data size: ${Object.keys(accountData).length}, Brand data size: ${Object.keys(brandData).length}`); // Added Log
+            // Get both unique people count and FTE data directly from dataService properties
+            const uniquePeopleCountData = dataService.accountUniquePeopleCount;
+            const fteAccountData = dataService.accountFTE; // FTE data for the second chart (if needed, currently using brand FTE)
+            const fteBrandData = dataService.brandFTEByAccount; // FTE data aggregated by brand for the second chart
 
+            console.log(`[LOG] Fetched data for charts. Unique People: ${Object.keys(uniquePeopleCountData).length} accounts, FTE Accounts: ${Object.keys(fteAccountData).length} accounts, FTE Brands: ${Object.keys(fteBrandData).length} accounts`); // Added Log
 
             if (config.debug) {
-                console.log(`[LOG] Refreshing charts for ${this.currentViewMode} view mode`);
+                console.log(`[LOG] Refreshing charts with specific data sets.`);
             }
 
-            // Create account chart
-            console.log("[LOG] Calling chartService.createAccountChart..."); // Added Log
-            chartService.createAccountChart(accountData, this.currentViewMode);
+            // Create account chart (using unique people count)
+            console.log("[LOG] Calling chartService.createAccountChart with unique people count data..."); // Added Log
+            // Pass 'unique_count' as the mode identifier for labeling purposes
+            chartService.createAccountChart(uniquePeopleCountData, 'unique_count');
             console.log("[LOG] chartService.createAccountChart finished."); // Added Log
 
 
-            // Create technology breakdown chart
-            console.log("[LOG] Calling chartService.createTechnologyChart..."); // Added Log
-            chartService.createTechnologyChart(brandData, this.currentViewMode);
+            // Create technology breakdown chart (using FTE data)
+            console.log("[LOG] Calling chartService.createTechnologyChart with FTE data..."); // Added Log
+            // Pass 'fte' as the mode identifier for labeling purposes
+            chartService.createTechnologyChart(fteBrandData, 'fte');
             console.log("[LOG] chartService.createTechnologyChart finished."); // Added Log
 
             console.log("[LOG] Exiting app.refreshCharts (success)"); // Added Log
