@@ -50,6 +50,11 @@ const app = {
                  this.refreshCharts();
                  console.log("[LOG] app.refreshCharts finished.");
 
+                 // Initialize Sankey visualization first
+                 console.log("[LOG] Initializing Sankey visualization with sample data...");
+                 sankeyVisualization.init(sampleData);
+                 console.log("[LOG] Sankey visualization initialized.");
+
                  // Apply initial filters (show all sample data)
                  console.log("[LOG] Calling app.applyFilters for initial sample data display...");
                  this.applyFilters();
@@ -99,6 +104,11 @@ const app = {
                 this.refreshCharts();
                 console.log("[LOG] app.refreshCharts finished."); // Added Log
 
+                // Initialize Sankey visualization first
+                console.log("[LOG] Initializing Sankey visualization..."); // Added Log
+                sankeyVisualization.init(data);
+                console.log("[LOG] Sankey visualization initialized."); // Added Log
+
                 // Apply initial filters to show all data
                 console.log("[LOG] Calling app.applyFilters for initial display..."); // Added Log
                 this.applyFilters();
@@ -137,6 +147,37 @@ const app = {
         uiService.updateResultsTable(filteredData, this.currentViewMode);
         console.log("[LOG] uiService.updateResultsTable finished."); // Added Log
 
+        // Update Sankey visualization with filtered data
+        console.log("[LOG] Updating Sankey visualization with filtered data..."); // Added Log
+        if (filters.account) {
+            sankeyVisualization.updateVisualization(filters.account);
+            // Sync with Sankey account filter
+            const sankeyAccountFilter = document.getElementById("accountFilterSankey");
+            if (sankeyAccountFilter && sankeyAccountFilter.value !== filters.account) {
+                sankeyAccountFilter.value = filters.account;
+            }
+        } else {
+            sankeyVisualization.updateVisualization("");
+            // Sync with Sankey account filter
+            const sankeyAccountFilter = document.getElementById("accountFilterSankey");
+            if (sankeyAccountFilter && sankeyAccountFilter.value !== "") {
+                sankeyAccountFilter.value = "";
+            }
+        }
+        console.log("[LOG] Sankey visualization updated."); // Added Log
+
+        // If a person filter is applied, show person details
+        if (filters.person && filters.person.trim() !== '') {
+            console.log(`[LOG] Person filter applied: ${filters.person}. Showing person details.`);
+            this.showPersonDetails(filters.person);
+        } else {
+            // Hide person details panel if no person filter is applied
+            const personDetailPanel = document.getElementById('personDetailPanel');
+            if (personDetailPanel) {
+                personDetailPanel.style.display = 'none';
+            }
+        }
+
         console.log("[LOG] Exiting app.applyFilters"); // Added Log
     },
 
@@ -169,6 +210,25 @@ const app = {
             // Pass 'fte' as the mode identifier for labeling purposes
             chartService.createTechnologyChart(fteBrandData, 'fte');
             console.log("[LOG] chartService.createTechnologyChart finished."); // Added Log
+            
+            // Create quota chart if quota data is available
+            if (dataService.hasQuota()) {
+                console.log("[LOG] Quota data available. Creating quota chart...");
+                const quotaChartCard = document.getElementById('quotaChartCard');
+                if (quotaChartCard) {
+                    quotaChartCard.style.display = 'block';
+                }
+                
+                const accountQuotas = quotaService.getAllAccountQuotas();
+                quotaChartService.createAccountQuotaChart(accountQuotas);
+                console.log("[LOG] Quota chart created.");
+            } else {
+                console.log("[LOG] No quota data available. Hiding quota chart.");
+                const quotaChartCard = document.getElementById('quotaChartCard');
+                if (quotaChartCard) {
+                    quotaChartCard.style.display = 'none';
+                }
+            }
 
             console.log("[LOG] Exiting app.refreshCharts (success)"); // Added Log
 
@@ -177,6 +237,7 @@ const app = {
             // Display error message in charts if possible
             const accountsChart = document.getElementById('accountsChart');
             const technologiesChart = document.getElementById('technologiesChart');
+            const accountQuotaChart = document.getElementById('accountQuotaChart');
 
             if (accountsChart) {
                 accountsChart.innerHTML = '<div class="alert alert-danger">Error rendering chart</div>';
@@ -185,6 +246,11 @@ const app = {
             if (technologiesChart) {
                 technologiesChart.innerHTML = '<div class="alert alert-danger">Error rendering chart</div>';
             }
+            
+            if (accountQuotaChart) {
+                accountQuotaChart.innerHTML = '<div class="alert alert-danger">Error rendering chart</div>';
+            }
+            
             console.log("[LOG] Exiting app.refreshCharts (with error)"); // Added Log
         }
     },
@@ -216,6 +282,17 @@ const app = {
             console.log("[LOG] Calling uiService.displayAccountDetails..."); // Added Log
             uiService.displayAccountDetails(accountData, this.currentViewMode);
             console.log("[LOG] uiService.displayAccountDetails finished."); // Added Log
+            
+            // Display quota breakdown charts if quota data is available
+            if (accountData.has_quota) {
+                console.log("[LOG] Quota data available for account. Showing quota breakdown...");
+                document.getElementById('quotaBreakdownSection').style.display = 'block';
+                quotaChartService.createAccountQuotaBreakdownChart(accountName, accountData.quota);
+                console.log("[LOG] Quota breakdown charts created.");
+            } else {
+                console.log("[LOG] No quota data available for account. Hiding quota breakdown section.");
+                document.getElementById('quotaBreakdownSection').style.display = 'none';
+            }
 
             console.log(`[LOG] Exiting app.showAccountDetails (success)`); // Added Log
 
@@ -224,10 +301,44 @@ const app = {
             uiService.showAccountDetailsError(accountName, error);
             console.log(`[LOG] Exiting app.showAccountDetails (with error)`); // Added Log
         }
+    },
+
+    /**
+     * Show details for a specific person
+     * @param {string} personName - Person name
+     */
+    showPersonDetails: function(personName) {
+        console.log(`[LOG] Entering app.showPersonDetails for person: ${personName}`);
+        if (config.debug) {
+            console.log(`[LOG] Loading details for person: ${personName}`);
+        }
+
+        // Show loading state
+        console.log("[LOG] Calling uiService.showPersonDetailsLoading...");
+        uiService.showPersonDetailsLoading(personName);
+        console.log("[LOG] uiService.showPersonDetailsLoading finished.");
+
+        try {
+            // Get person details
+            console.log("[LOG] Calling dataService.getPersonDetails...");
+            const personData = dataService.getPersonDetails(personName);
+            console.log(`[LOG] dataService.getPersonDetails finished for ${personName}. Total accounts: ${personData.accounts.length}`);
+
+            // Display person details
+            console.log("[LOG] Calling uiService.displayPersonDetails...");
+            uiService.displayPersonDetails(personData);
+            console.log("[LOG] uiService.displayPersonDetails finished.");
+
+            console.log(`[LOG] Exiting app.showPersonDetails (success)`);
+
+        } catch (error) {
+            console.error("[LOG] Error in app.showPersonDetails:", error);
+            uiService.showPersonDetailsError(personName, error);
+            console.log(`[LOG] Exiting app.showPersonDetails (with error)`);
+        }
     }
 };
 
-// Initialize the application when the DOM is ready
 document.addEventListener('DOMContentLoaded', function() {
     console.log("[LOG] DOMContentLoaded event fired."); // Added Log
     app.init();
