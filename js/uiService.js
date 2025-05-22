@@ -199,8 +199,29 @@ const uiService = {
                 this.addOption(flmSelect, flm, flm);
             }
         });
-         console.log(`[LOG] Populated ${filters.flms.length} FLM options.`); // Added Log
-
+        console.log(`[LOG] Populated ${filters.flms.length} FLM options.`); // Added Log
+        
+        // Person Type filter
+        const personTypeSelect = document.getElementById('personTypeFilter');
+        if (personTypeSelect) {
+            this.clearOptions(personTypeSelect);
+            this.addOption(personTypeSelect, '', 'All Types');
+            
+            // Add person types from filter options if available
+            if (filters.personTypes && filters.personTypes.length > 0) {
+                filters.personTypes.forEach(type => {
+                    if (type && type.trim() !== "") {
+                        this.addOption(personTypeSelect, type, type);
+                    }
+                });
+                console.log(`[LOG] Populated ${filters.personTypes.length} person type options.`);
+            } else {
+                // Fallback to hardcoded CE and CSM options
+                this.addOption(personTypeSelect, 'CE', 'CE');
+                this.addOption(personTypeSelect, 'CSM', 'CSM');
+                console.log(`[LOG] Populated hardcoded person type options.`);
+            }
+        }
 
         console.log("[LOG] Exiting uiService.populateFilters"); // Added Log
     },
@@ -247,6 +268,7 @@ const uiService = {
             account: document.getElementById('accountFilter')?.value || '',
             slm: document.getElementById('slmFilter')?.value || '',
             flm: document.getElementById('flmFilter')?.value || '',
+            personType: document.getElementById('personTypeFilter')?.value || '',
             person: document.getElementById('personFilter')?.value || ''
         };
         console.log("[LOG] Exiting uiService.getFilterValues. Returning filters:", filters); // Added Log
@@ -402,9 +424,16 @@ const uiService = {
         console.log("[LOG] Account detail panel set to display: block."); // Added Log
 
 
-        // Always show FTE information in the account title
-        accountDetailTitle.textContent =
-            `${accountData.account} (${accountData.total_people} people, ${accountData.total_fte.toFixed(2)} FTE)`;
+        // Always show FTE information in the account title, and quota if available
+        let titleText = `${accountData.account} (${accountData.total_people} people, ${accountData.total_fte.toFixed(2)} FTE`;
+        
+        // Add quota information if available
+        if (accountData.has_quota) {
+            titleText += `, Quota: ${accountData.quota.total_quota.toFixed(2)}`;
+        }
+        
+        titleText += ')';
+        accountDetailTitle.textContent = titleText;
         console.log(`[LOG] Account detail title updated: "${accountDetailTitle.textContent}"`); // Added Log
 
 
@@ -549,12 +578,29 @@ const uiService = {
      * @returns {string} HTML string for the table cells (<td> elements).
      */
     _createPersonnelTableRowHTML: function(personData, viewMode) {
+        // Determine the specialty/role to display
+        let specialtyDisplay = '-';
+        if (personData.specialty && personData.specialty.trim() !== '') {
+            // Use specialty field if available (for CE/CSM)
+            specialtyDisplay = personData.specialty;
+        } else if (personData.role && personData.role.trim() !== '') {
+            // Fall back to role field
+            specialtyDisplay = personData.role;
+        }
+        
+        // Add person type badge if available (CE/CSM)
+        let personDisplay = personData.person || '-';
+        if (personData.personType) {
+            const badgeClass = personData.personType === 'CE' ? 'bg-info' : 'bg-success';
+            personDisplay = `${personData.person} <span class="badge ${badgeClass}">${personData.personType}</span>`;
+        }
+        
         let cellsHTML = `
             <td>${personData.brand || '-'}</td>
             <td>${personData.slm || '-'}</td>
             <td>${personData.flm || '-'}</td>
-            <td>${personData.person || '-'}</td>
-            <td>${personData.role || '-'}</td> <!-- Specialty/Role -->
+            <td>${personDisplay}</td>
+            <td>${specialtyDisplay}</td> <!-- Specialty/Role -->
         `;
 
         // Always add allocation column (we're always in FTE mode)
@@ -567,32 +613,149 @@ const uiService = {
         } else {
              cellsHTML += `<td>-</td>`; // Placeholder if not FTE mode (though currently always FTE)
         }
-         return cellsHTML;
+        
+        // Add quota percentage column if available
+        if (personData.quotaPercentage !== undefined) {
+            cellsHTML += `<td>${personData.quotaPercentage.toFixed(2)}%</td>`;
+        } else {
+            cellsHTML += `<td>-</td>`;
+        }
+        
+        return cellsHTML;
      },
  
-     /**
-      * Shows the main dashboard container.
-      */
-     showDashboardContainer: function() {
-         const dashboardContainer = document.getElementById('dashboardContainer');
-         if (dashboardContainer) {
-             dashboardContainer.style.display = 'block';
-             console.log("[LOG] Dashboard container shown.");
-         } else {
-             console.error("[LOG] Dashboard container element not found!");
-         }
-     },
- 
-     /**
-      * Hides the main dashboard container.
-      */
-     hideDashboardContainer: function() {
-         const dashboardContainer = document.getElementById('dashboardContainer');
-         if (dashboardContainer) {
-             dashboardContainer.style.display = 'none';
-             console.log("[LOG] Dashboard container hidden.");
-         } else {
-             console.error("[LOG] Dashboard container element not found!");
-         }
-     }
+    /**
+     * Display person details
+     * @param {Object} personData - Person detail data
+     */
+    displayPersonDetails: function(personData) {
+        console.log(`[LOG] Entering uiService.displayPersonDetails for person: ${personData.person}`);
+        console.log("[LOG] Person data for details:", personData);
+
+        // Show the person detail panel
+        const personDetailPanel = document.getElementById('personDetailPanel');
+        const personDetailTitle = document.getElementById('personDetailTitle');
+        const personAccountsTable = document.getElementById('personAccountsTable');
+
+        if (!personDetailPanel || !personDetailTitle || !personAccountsTable) {
+            console.warn("[LOG] displayPersonDetails: Required DOM elements for details panel not found.");
+            return;
+        }
+
+        personDetailPanel.style.display = 'block';
+        console.log("[LOG] Person detail panel set to display: block.");
+
+        // Set the title with person name and total quota if available
+        let titleText = `${personData.person}`;
+        if (personData.totalQuota > 0) {
+            titleText += ` (Total Quota: ${personData.totalQuota.toFixed(2)})`;
+        }
+        personDetailTitle.textContent = titleText;
+        console.log(`[LOG] Person detail title updated: "${personDetailTitle.textContent}"`);
+
+        // Populate accounts table
+        console.log(`[LOG] Populating accounts table for ${personData.person}...`);
+        personAccountsTable.innerHTML = ''; // Clear existing rows
+
+        if (!personData.accounts || personData.accounts.length === 0) {
+            console.log("[LOG] No accounts data for this person.");
+            const row = document.createElement('tr');
+            row.innerHTML = `<td colspan="5" class="text-center">No accounts listed for this person.</td>`;
+            personAccountsTable.appendChild(row);
+            console.log("[LOG] Added 'No accounts' row to detail table.");
+        } else {
+            personData.accounts.forEach((account, index) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${account.account || '-'}</td>
+                    <td>${account.allocation.toFixed(2)}</td>
+                    <td>${account.allocatedQuota.toFixed(2)}</td>
+                    <td>${account.quotaPercentage.toFixed(2)}%</td>
+                    <td>
+                        <button class="btn btn-sm btn-info" onclick="app.showAccountDetails('${account.account}')">
+                            View Account
+                        </button>
+                    </td>
+                `;
+                personAccountsTable.appendChild(row);
+            });
+            console.log(`[LOG] Finished populating accounts table with ${personData.accounts.length} entries.`);
+        }
+
+        console.log("[LOG] Exiting uiService.displayPersonDetails");
+    },
+
+    /**
+     * Show loading state for person details
+     * @param {string} personName - Person name
+     */
+    showPersonDetailsLoading: function(personName) {
+        console.log(`[LOG] Entering uiService.showPersonDetailsLoading for person: ${personName}`);
+        const personDetailPanel = document.getElementById('personDetailPanel');
+        const personDetailTitle = document.getElementById('personDetailTitle');
+        const personAccountsTable = document.getElementById('personAccountsTable');
+
+        if (!personDetailPanel || !personDetailTitle || !personAccountsTable) {
+            console.warn("[LOG] showPersonDetailsLoading: Required DOM elements for details panel not found.");
+            return;
+        }
+
+        personDetailPanel.style.display = 'block';
+        personDetailTitle.textContent = `Loading ${personName} details...`;
+        personAccountsTable.innerHTML = '<tr><td colspan="5" class="text-center">Loading...</td></tr>';
+
+        console.log(`[LOG] Person details loading state set for ${personName}`);
+        console.log("[LOG] Exiting uiService.showPersonDetailsLoading");
+    },
+
+    /**
+     * Show error message for person details
+     * @param {string} personName - Person name
+     * @param {Error} error - Error object
+     */
+    showPersonDetailsError: function(personName, error) {
+        console.log(`[LOG] Entering uiService.showPersonDetailsError for person: ${personName}`);
+        const personDetailTitle = document.getElementById('personDetailTitle');
+        const personAccountsTable = document.getElementById('personAccountsTable');
+
+        if (!personDetailTitle || !personAccountsTable) {
+            console.warn("[LOG] showPersonDetailsError: Required DOM elements for details panel not found.");
+            return;
+        }
+
+        personDetailTitle.textContent = `Error loading ${personName} details`;
+        personAccountsTable.innerHTML =
+            '<tr><td colspan="5" class="text-center text-danger">Error loading data. Please try again.</td></tr>';
+
+        this.logDebug(`Error loading person details: ${error.message}`);
+
+        console.log(`[LOG] Person details error state set for ${personName}`);
+        console.log("[LOG] Exiting uiService.showPersonDetailsError");
+    },
+
+    /**
+     * Shows the main dashboard container.
+     */
+    showDashboardContainer: function() {
+        const dashboardContainer = document.getElementById('dashboardContainer');
+        if (dashboardContainer) {
+            dashboardContainer.style.display = 'block';
+            console.log("[LOG] Dashboard container shown.");
+        } else {
+            console.error("[LOG] Dashboard container element not found!");
+        }
+    },
+
+    /**
+     * Hides the main dashboard container.
+     */
+    hideDashboardContainer: function() {
+        const dashboardContainer = document.getElementById('dashboardContainer');
+        if (dashboardContainer) {
+            dashboardContainer.style.display = 'none';
+            console.log("[LOG] Dashboard container hidden.");
+        } else {
+            console.error("[LOG] Dashboard container element not found!");
+        }
+    }
  };

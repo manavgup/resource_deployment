@@ -1,7 +1,8 @@
 /**
  * Excel Parser for Account Deployment Dashboard
  * Handles parsing the Excel file with hierarchical structure (SLM -> FLM -> Employees)
- * Optimized version to prevent script timeouts
+ * Enhanced version to handle multiple worksheet types (Data, Automation, Infrastructure, CE, CSM, Quota)
+ * Optimized to prevent script timeouts
  */
 const excelParser = {
     /**
@@ -67,100 +68,553 @@ const excelParser = {
         console.log("[LOG] Entering excelParser.processWorkbook"); // Added Log
         // Store all extracted data
         const allData = [];
+        
+        // Store CE and CSM data for cross-referencing
+        const ceData = [];
+        const csmData = [];
 
-        // Each sheet represents a "Brand"
+        // Process each sheet based on its type
         workbook.SheetNames.forEach((sheetName, sheetIndex) => {
-            const brand = sheetName;
-            this.logDebug(`Processing sheet ${sheetIndex + 1}/${workbook.SheetNames.length}: ${brand}`);
+            this.logDebug(`Processing sheet ${sheetIndex + 1}/${workbook.SheetNames.length}: ${sheetName}`);
 
             // Get the worksheet
             const worksheet = workbook.Sheets[sheetName];
 
             // Convert to array format with headers
-            console.log(`[LOG] Converting sheet "${brand}" to JSON array...`); // Added Log
+            console.log(`[LOG] Converting sheet "${sheetName}" to JSON array...`); // Added Log
             const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-            console.log(`[LOG] Sheet "${brand}" converted. Found ${data.length} rows.`); // Added Log
-
+            console.log(`[LOG] Sheet "${sheetName}" converted. Found ${data.length} rows.`); // Added Log
 
             if (data.length < 2) { // Changed from 3 to 2, as header + 1 data row is enough
-                this.logDebug(`Not enough data in sheet ${brand} (less than 2 rows including header)`);
+                this.logDebug(`Not enough data in sheet ${sheetName} (less than 2 rows including header)`);
                 return;
             }
 
             // The first row contains header information
             const headerRow = data[0] || [];
-            console.log(`[LOG] Sheet "${brand}" header row has ${headerRow.length} columns.`); // Added Log
+            console.log(`[LOG] Sheet "${sheetName}" header row has ${headerRow.length} columns.`); // Added Log
 
-
-            // Find SLM and FLM column indices - optimization: do this once per sheet
-            const slmIndices = [];
-            const flmIndices = [];
-            const headerColumns = {}; // Store header column names by index for quick lookup
-
-            console.log("[LOG] Identifying SLM and FLM columns..."); // Added Log
-            headerRow.forEach((cell, index) => {
-                if (cell && typeof cell === 'string') {
-                    headerColumns[index] = cell;
-                    if (cell.includes('SLM')) {
-                        slmIndices.push(index);
-                        this.logDebug(`Found SLM column at index ${index}: "${cell}"`);
-                    } else if (cell.includes('FLM')) {
-                        flmIndices.push(index);
-                        this.logDebug(`Found FLM column at index ${index}: "${cell}"`);
-                    }
-                }
-            });
-
-            if (slmIndices.length === 0) {
-                this.logDebug(`No SLM columns found in sheet ${brand}. Skipping sheet.`);
-                return;
+            // Determine sheet type based on name
+            if (sheetName === 'CE') {
+                this.processCESheet(data, headerRow, ceData);
+            } else if (sheetName === 'CSM') {
+                this.processCSMSheet(data, headerRow, csmData);
+            } else if (sheetName === 'Quota') {
+                this.processQuotaSheet(data, headerRow, allData);
+            } else if (sheetName === 'QUOTA_PRI') { // Added case for QUOTA_PRI
+                this.processQUOTAPRISheet(data, headerRow, allData); // Call new processing function
+            } else {
+                // Treat as a regular "Brand" sheet (Data, Automation, Infrastructure)
+                this.processBrandSheet(sheetName, data, headerRow, allData);
             }
-
-            this.logDebug(`Found ${slmIndices.length} SLM columns and ${flmIndices.length} FLM columns`);
-
-            // Build hierarchy group mapping more efficiently
-            console.log("[LOG] Building hierarchy groups..."); // Added Log
-            const hierarchyGroups = this.buildHierarchyGroups(slmIndices, flmIndices, headerRow);
-            console.log(`[LOG] Built ${hierarchyGroups.length} hierarchy groups.`); // Added Log
-
-
-            // Process data rows (row 2 onwards, skipping the header row)
-            // Add progress logging for better debugging and browser responsiveness
-            const totalDataRows = data.length - 1;
-            this.logDebug(`Processing ${totalDataRows} data rows in sheet "${brand}"`);
-
-            // Process rows - report progress every few rows for small sheets
-             const logInterval = Math.max(1, Math.floor(totalDataRows / 10)); // Log at least once per 10% or once if less than 10 rows
-
-            for (let rowIdx = 1; rowIdx < data.length; rowIdx++) {
-                if (rowIdx % logInterval === 0 || rowIdx === 1 || rowIdx === data.length -1) { // Log start, interval, and end
-                     this.logDebug(`Processing row ${rowIdx}/${data.length - 1} (${Math.round(rowIdx / (data.length - 1) * 100)}%) in sheet "${brand}"`);
-                }
-
-                const row = data[rowIdx];
-
-                // Skip empty rows or rows without account name (assuming Account is column index 1)
-                if (!row || !row[1] || String(row[1]).trim() === '') { // Ensure row[1] exists and is not just whitespace
-                     if (rowIdx % logInterval === 0 || rowIdx === 1 || rowIdx === data.length -1) {
-                         this.logDebug(`Skipping empty or account-less row ${rowIdx}`);
-                     }
-                     continue;
-                }
-
-                // Get account name and client type
-                const account = String(row[1]).trim(); // Trim whitespace
-                const clientType = row[2] ? String(row[2]).trim() : ''; // Trim whitespace or default to empty
-
-
-                // Process each hierarchy group with optimized code
-                // Removed console.log here to avoid excessive logging per row
-                this.processRowHierarchies(row, hierarchyGroups, headerRow, account, clientType, brand, allData);
-            }
-             this.logDebug(`Finished processing all data rows in sheet "${brand}".`); // Added Log
         });
+
+        // Process relationships between CE/CSM data and account data
+        this.processRelationships(allData, ceData, csmData);
 
         console.log("[LOG] Exiting excelParser.processWorkbook. Total records extracted:", allData.length); // Added Log
         return allData;
+    },
+
+    /**
+     * Process a regular brand sheet (Data, Automation, Infrastructure)
+     * @param {string} brand - Brand name (sheet name)
+     * @param {Array} data - Sheet data as array
+     * @param {Array} headerRow - Header row with column names
+     * @param {Array} allData - Array to store extracted data
+     */
+    processBrandSheet: function(brand, data, headerRow, allData) {
+        console.log(`[LOG] Processing brand sheet: ${brand}`);
+        
+        // Find SLM and FLM column indices - optimization: do this once per sheet
+        const slmIndices = [];
+        const flmIndices = [];
+        const headerColumns = {}; // Store header column names by index for quick lookup
+
+        console.log("[LOG] Identifying SLM and FLM columns..."); // Added Log
+        headerRow.forEach((cell, index) => {
+            if (cell && typeof cell === 'string') {
+                headerColumns[index] = cell;
+                if (cell.includes('SLM')) {
+                    slmIndices.push(index);
+                    this.logDebug(`Found SLM column at index ${index}: "${cell}"`);
+                } else if (cell.includes('FLM')) {
+                    flmIndices.push(index);
+                    this.logDebug(`Found FLM column at index ${index}: "${cell}"`);
+                }
+            }
+        });
+
+        if (slmIndices.length === 0) {
+            this.logDebug(`No SLM columns found in sheet ${brand}. Skipping sheet.`);
+            return;
+        }
+
+        this.logDebug(`Found ${slmIndices.length} SLM columns and ${flmIndices.length} FLM columns`);
+
+        // Build hierarchy group mapping more efficiently
+        console.log("[LOG] Building hierarchy groups..."); // Added Log
+        const hierarchyGroups = this.buildHierarchyGroups(slmIndices, flmIndices, headerRow);
+        console.log(`[LOG] Built ${hierarchyGroups.length} hierarchy groups.`); // Added Log
+
+        // Process data rows (row 2 onwards, skipping the header row)
+        // Add progress logging for better debugging and browser responsiveness
+        const totalDataRows = data.length - 1;
+        this.logDebug(`Processing ${totalDataRows} data rows in sheet "${brand}"`);
+
+        // Process rows - report progress every few rows for small sheets
+        const logInterval = Math.max(1, Math.floor(totalDataRows / 10)); // Log at least once per 10% or once if less than 10 rows
+
+        for (let rowIdx = 1; rowIdx < data.length; rowIdx++) {
+            if (rowIdx % logInterval === 0 || rowIdx === 1 || rowIdx === data.length -1) { // Log start, interval, and end
+                this.logDebug(`Processing row ${rowIdx}/${data.length - 1} (${Math.round(rowIdx / (data.length - 1) * 100)}%) in sheet "${brand}"`);
+            }
+
+            const row = data[rowIdx];
+
+            // Skip empty rows or rows without account name (assuming Account is column index 1)
+            if (!row || !row[1] || String(row[1]).trim() === '') { // Ensure row[1] exists and is not just whitespace
+                if (rowIdx % logInterval === 0 || rowIdx === 1 || rowIdx === data.length -1) {
+                    this.logDebug(`Skipping empty or account-less row ${rowIdx}`);
+                }
+                continue;
+            }
+
+            // Get account name and client type
+            const account = String(row[1]).trim(); // Trim whitespace
+            const clientType = row[2] ? String(row[2]).trim() : ''; // Trim whitespace or default to empty
+
+            // Process each hierarchy group with optimized code
+            this.processRowHierarchies(row, hierarchyGroups, headerRow, account, clientType, brand, allData);
+        }
+        this.logDebug(`Finished processing all data rows in sheet "${brand}".`); // Added Log
+    },
+
+    /**
+     * Process CE (Customer Engineer) worksheet
+     * @param {Array} data - Sheet data as array
+     * @param {Array} headerRow - Header row with column names
+     * @param {Array} ceData - Array to store CE data
+     */
+    processCESheet: function(data, headerRow, ceData) {
+        console.log("[LOG] Processing CE sheet");
+        
+        // Find column indices for CE sheet
+        const columnIndices = {};
+        headerRow.forEach((cell, index) => {
+            if (cell && typeof cell === 'string') {
+                const cellName = cell.trim();
+                if (cellName === 'Employee Name') columnIndices.employeeName = index;
+                else if (cellName === 'FLM / SLM') columnIndices.flmSlm = index;
+                else if (cellName === 'Title') columnIndices.title = index;
+                else if (cellName === 'Coverage') columnIndices.coverage = index;
+                else if (cellName === 'Manager') columnIndices.manager = index;
+                else if (cellName === 'Level') columnIndices.level = index;
+            }
+        });
+        
+        this.logDebug(`CE sheet column indices: ${JSON.stringify(columnIndices)}`);
+        
+        // Process data rows (row 2 onwards, skipping the header row)
+        for (let rowIdx = 1; rowIdx < data.length; rowIdx++) {
+            const row = data[rowIdx];
+            
+            // Skip empty rows
+            if (!row || !row[columnIndices.employeeName]) continue;
+            
+            const employeeName = String(row[columnIndices.employeeName] || '').trim();
+            const flmSlm = String(row[columnIndices.flmSlm] || '').trim();
+            const title = String(row[columnIndices.title] || '').trim();
+            const coverage = String(row[columnIndices.coverage] || '').trim();
+            const manager = String(row[columnIndices.manager] || '').trim();
+            const level = String(row[columnIndices.level] || '').trim();
+            
+            // Skip if employee name is empty or a placeholder
+            if (!employeeName || this.isPlaceholder(employeeName)) continue;
+            
+            // Determine if the person is an FLM or SLM
+            const isFLM = flmSlm.includes('FLM');
+            const isSLM = flmSlm.includes('SLM');
+            
+            ceData.push({
+                person: employeeName,
+                flmSlm: flmSlm,
+                isFLM: isFLM,
+                isSLM: isSLM,
+                title: title,
+                coverage: coverage,
+                manager: manager,
+                level: level,
+                type: 'CE' // Mark as CE type
+            });
+        }
+        
+        this.logDebug(`Processed ${ceData.length} CE records`);
+    },
+
+    /**
+     * Process CSM (Customer Success Manager) worksheet
+     * @param {Array} data - Sheet data as array
+     * @param {Array} headerRow - Header row with column names
+     * @param {Array} csmData - Array to store CSM data
+     */
+    processCSMSheet: function(data, headerRow, csmData) {
+        console.log("[LOG] Processing CSM sheet");
+        
+        // Find column indices for CSM sheet
+        const columnIndices = {};
+        headerRow.forEach((cell, index) => {
+            if (cell && typeof cell === 'string') {
+                const cellName = cell.trim();
+                if (cellName === 'Employee Name') columnIndices.employeeName = index;
+                else if (cellName === 'FLM / SLM') columnIndices.flmSlm = index;
+                else if (cellName === 'Specialty') columnIndices.specialty = index;
+                else if (cellName === 'Department/Team') columnIndices.department = index;
+                else if (cellName === 'Manager') columnIndices.manager = index;
+                else if (cellName === 'Level') columnIndices.level = index;
+            }
+        });
+        
+        this.logDebug(`CSM sheet column indices: ${JSON.stringify(columnIndices)}`);
+        
+        // Process data rows (row 2 onwards, skipping the header row)
+        for (let rowIdx = 1; rowIdx < data.length; rowIdx++) {
+            const row = data[rowIdx];
+            
+            // Skip empty rows
+            if (!row || !row[columnIndices.employeeName]) continue;
+            
+            const employeeName = String(row[columnIndices.employeeName] || '').trim();
+            const flmSlm = String(row[columnIndices.flmSlm] || '').trim();
+            const specialty = String(row[columnIndices.specialty] || '').trim();
+            const department = String(row[columnIndices.department] || '').trim();
+            const manager = String(row[columnIndices.manager] || '').trim();
+            const level = String(row[columnIndices.level] || '').trim();
+            
+            // Skip if employee name is empty or a placeholder
+            if (!employeeName || this.isPlaceholder(employeeName)) continue;
+            
+            // Determine if the person is an FLM or SLM
+            const isFLM = flmSlm.includes('FLM');
+            const isSLM = flmSlm.includes('SLM');
+            
+            csmData.push({
+                person: employeeName,
+                flmSlm: flmSlm,
+                isFLM: isFLM,
+                isSLM: isSLM,
+                specialty: specialty,
+                department: department,
+                manager: manager,
+                level: level,
+                type: 'CSM' // Mark as CSM type
+            });
+        }
+        
+        this.logDebug(`Processed ${csmData.length} CSM records`);
+    },
+
+    /**
+     * Process Quota worksheet
+     * @param {Array} data - Sheet data as array
+     * @param {Array} headerRow - Header row with column names
+     * @param {Array} allData - Array to store extracted data
+     */
+    processQuotaSheet: function(data, headerRow, allData) {
+        console.log("[LOG] Processing Quota sheet");
+        
+        // Find column indices for Quota sheet
+        const columnIndices = {};
+        headerRow.forEach((cell, index) => {
+            if (cell && typeof cell === 'string') {
+                const cellName = cell.trim().toLowerCase();
+                if (cellName === 'seller talent id') columnIndices.sellerTalentId = index;
+                else if (cellName === 'seller name') columnIndices.sellerName = index;
+                else if (cellName === 'total') columnIndices.total = index;
+                else if (cellName === 'band') columnIndices.band = index;
+                else if (cellName === 'role') columnIndices.role = index;
+                else if (cellName === 'platform') columnIndices.platform = index;
+                else if (cellName === 'manager') columnIndices.manager = index;
+                else if (cellName === 'manager flag') columnIndices.managerFlag = index;
+                else if (cellName === 'tqp/iqp') columnIndices.tqpIqp = index;
+            }
+        });
+        
+        this.logDebug(`Quota sheet column indices: ${JSON.stringify(columnIndices)}`);
+        
+        // Check if we found the required columns
+        if (!columnIndices.sellerName || !columnIndices.total) {
+            this.logDebug("Required columns not found in Quota sheet. Skipping.");
+            return;
+        }
+        
+        // Process data rows (row 2 onwards, skipping the header row)
+        const quotaData = [];
+        
+        for (let rowIdx = 1; rowIdx < data.length; rowIdx++) {
+            const row = data[rowIdx];
+            
+            // Skip empty rows
+            if (!row || !row[columnIndices.sellerName]) continue;
+            
+            const sellerTalentId = columnIndices.sellerTalentId !== undefined ? String(row[columnIndices.sellerTalentId] || '') : '';
+            const sellerName = String(row[columnIndices.sellerName] || '').trim();
+            const total = columnIndices.total !== undefined ? row[columnIndices.total] : 0;
+            const band = columnIndices.band !== undefined ? String(row[columnIndices.band] || '') : '';
+            const role = columnIndices.role !== undefined ? String(row[columnIndices.role] || '') : '';
+            const platform = columnIndices.platform !== undefined ? String(row[columnIndices.platform] || '') : '';
+            const manager = columnIndices.manager !== undefined ? String(row[columnIndices.manager] || '') : '';
+            const managerFlag = columnIndices.managerFlag !== undefined ? String(row[columnIndices.managerFlag] || '') : '';
+            const tqpIqp = columnIndices.tqpIqp !== undefined ? String(row[columnIndices.tqpIqp] || '') : '';
+            
+            // Skip if seller name is empty or a placeholder
+            if (!sellerName || this.isPlaceholder(sellerName)) continue;
+            
+            // Create quota data object
+            const quotaItem = {
+                sellerTalentId,
+                sellerName,
+                total,
+                band,
+                role,
+                platform,
+                manager,
+                managerFlag,
+                tqpIqp
+            };
+            
+            // Add to quota data array
+            quotaData.push(quotaItem);
+        }
+        
+        this.logDebug(`Processed ${quotaData.length} quota records`);
+        
+        // Store quota data in allData with a special type
+        if (quotaData.length > 0) {
+            // Store the quota data separately for later processing
+            if (!allData.quotaData) {
+                allData.quotaData = quotaData;
+            } else {
+                allData.quotaData = allData.quotaData.concat(quotaData);
+            }
+        }
+    },
+
+    /**
+     * Process QUOTA_PRI worksheet
+     * @param {Array} data - Sheet data as array
+     * @param {Array} headerRow - Header row with column names
+     * @param {Array} allData - Array to store extracted data
+     */
+    processQUOTAPRISheet: function(data, headerRow, allData) {
+        console.log("[LOG] Processing QUOTA_PRI sheet");
+        
+        // Find column indices for QUOTA_PRI sheet
+        const columnIndices = {};
+        headerRow.forEach((cell, index) => {
+            if (cell && typeof cell === 'string') {
+                const cellName = cell.trim();
+                if (cellName === 'Seller Talent ID') columnIndices.sellerTalentId = index;
+                else if (cellName === 'Seller Name') columnIndices.sellerName = index;
+                else if (cellName === 'Mgr Name') columnIndices.managerName = index; // New column
+                else if (cellName === 'Manager Talent ID') columnIndices.managerTalentId = index; // New column
+                else if (cellName === 'Target/Quota Amt') columnIndices.targetQuotaAmt = index; // New column
+                else if (cellName === 'Territory Type Name') columnIndices.territoryTypeName = index; // New column
+                else if (cellName === 'Org Code') columnIndices.orgCode = index; // New column
+                // Add other columns if needed for future use, but focus on required ones for now
+            }
+        });
+        
+        this.logDebug(`QUOTA_PRI sheet column indices: ${JSON.stringify(columnIndices)}`);
+        
+        // Check if we found the required columns
+        if (!columnIndices.sellerName || !columnIndices.targetQuotaAmt || !columnIndices.territoryTypeName || !columnIndices.orgCode) {
+            this.logDebug("Required columns not found in QUOTA_PRI sheet. Skipping.");
+            return;
+        }
+        
+        // Process data rows (row 2 onwards, skipping the header row)
+        const quotaData = [];
+        
+        for (let rowIdx = 1; rowIdx < data.length; rowIdx++) {
+            const row = data[rowIdx];
+            
+            // Skip empty rows or rows without a seller name or quota amount
+            if (!row || !row[columnIndices.sellerName] || !row[columnIndices.targetQuotaAmt]) continue;
+            
+            const sellerTalentId = columnIndices.sellerTalentId !== undefined ? String(row[columnIndices.sellerTalentId] || '') : '';
+            const sellerName = String(row[columnIndices.sellerName] || '').trim();
+            const managerName = columnIndices.managerName !== undefined ? String(row[columnIndices.managerName] || '').trim() : '';
+            const managerTalentId = columnIndices.managerTalentId !== undefined ? String(row[columnIndices.managerTalentId] || '') : '';
+            const targetQuotaAmt = columnIndices.targetQuotaAmt !== undefined ? parseFloat(row[columnIndices.targetQuotaAmt]) || 0 : 0;
+            const territoryTypeName = columnIndices.territoryTypeName !== undefined ? String(row[columnIndices.territoryTypeName] || '').trim() : '';
+            const orgCode = columnIndices.orgCode !== undefined ? String(row[columnIndices.orgCode] || '').trim() : '';
+            
+            // Skip if seller name is empty or a placeholder
+            if (!sellerName || this.isPlaceholder(sellerName)) continue;
+            
+            // Create quota data object
+            const quotaItem = {
+                sellerTalentId,
+                sellerName,
+                managerName,
+                managerTalentId,
+                targetQuotaAmt,
+                territoryTypeName,
+                orgCode
+            };
+            
+            // Add to quota data array
+            quotaData.push(quotaItem);
+        }
+        
+        this.logDebug(`Processed ${quotaData.length} QUOTA_PRI records`);
+        
+        // Store quota data in allData with a special type
+        if (quotaData.length > 0) {
+            // Store the quota data separately for later processing
+            if (!allData.quotaData) {
+                allData.quotaData = quotaData;
+            } else {
+                allData.quotaData = allData.quotaData.concat(quotaData);
+            }
+        }
+    },
+
+    /**
+     * Process relationships between CE/CSM data and account data
+     * @param {Array} allData - Array of all data records
+     * @param {Array} ceData - Array of CE data records
+     * @param {Array} csmData - Array of CSM data records
+     */
+    processRelationships: function(allData, ceData, csmData) {
+        console.log("[LOG] Processing relationships between CE/CSM data and accounts");
+        
+        // Create a map of SLM/FLM names to accounts
+        const slmToAccounts = {};
+        const flmToAccounts = {};
+        
+        // First pass: build the mapping of SLM/FLM to accounts
+        allData.forEach(item => {
+            if (item.slm && item.slm !== 'N/A') {
+                if (!slmToAccounts[item.slm]) slmToAccounts[item.slm] = new Set();
+                slmToAccounts[item.slm].add(item.account);
+            }
+            
+            if (item.flm && item.flm !== 'N/A') {
+                if (!flmToAccounts[item.flm]) flmToAccounts[item.flm] = new Set();
+                flmToAccounts[item.flm].add(item.account);
+            }
+        });
+        
+        // Process CE data and add to allData
+        ceData.forEach(ce => {
+            let accounts = new Set();
+            
+            // If CE is an SLM, find accounts they manage
+            if (ce.isSLM && slmToAccounts[ce.person]) {
+                accounts = new Set([...accounts, ...slmToAccounts[ce.person]]);
+            }
+            
+            // If CE is an FLM, find accounts they manage
+            if (ce.isFLM && flmToAccounts[ce.person]) {
+                accounts = new Set([...accounts, ...flmToAccounts[ce.person]]);
+            }
+            
+            // If no accounts found but we have coverage information, use that
+            if (accounts.size === 0 && ce.coverage) {
+                // Coverage might list multiple accounts separated by commas
+                const coverageAccounts = ce.coverage.split(',').map(a => a.trim());
+                coverageAccounts.forEach(account => {
+                    if (account && !this.isPlaceholder(account)) accounts.add(account);
+                });
+            }
+            
+            // Add CE to allData for each account they cover
+            accounts.forEach(account => {
+                allData.push({
+                    account: account,
+                    brand: 'CE', // Use CE as the brand
+                    slm: ce.isSLM ? ce.person : (ce.manager || 'N/A'),
+                    flm: ce.isFLM ? ce.person : 'N/A',
+                    person: ce.person,
+                    role: ce.title || 'CE',
+                    hierarchyName: 'Customer Engineering',
+                    clientType: '',
+                    specialty: ce.specialty || '',
+                    level: ce.level || '',
+                    personType: 'CE' // Add person type
+                });
+            });
+            
+            // If no accounts found, still add the CE with a generic account
+            if (accounts.size === 0) {
+                allData.push({
+                    account: 'Unassigned',
+                    brand: 'CE',
+                    slm: ce.isSLM ? ce.person : (ce.manager || 'N/A'),
+                    flm: ce.isFLM ? ce.person : 'N/A',
+                    person: ce.person,
+                    role: ce.title || 'CE',
+                    hierarchyName: 'Customer Engineering',
+                    clientType: '',
+                    specialty: ce.specialty || '',
+                    level: ce.level || '',
+                    personType: 'CE'
+                });
+            }
+        });
+        
+        // Process CSM data and add to allData
+        csmData.forEach(csm => {
+            let accounts = new Set();
+            
+            // If CSM is an SLM, find accounts they manage
+            if (csm.isSLM && slmToAccounts[csm.person]) {
+                accounts = new Set([...accounts, ...slmToAccounts[csm.person]]);
+            }
+            
+            // If CSM is an FLM, find accounts they manage
+            if (csm.isFLM && flmToAccounts[csm.person]) {
+                accounts = new Set([...accounts, ...flmToAccounts[csm.person]]);
+            }
+            
+            // Add CSM to allData for each account they cover
+            accounts.forEach(account => {
+                allData.push({
+                    account: account,
+                    brand: 'CSM', // Use CSM as the brand
+                    slm: csm.isSLM ? csm.person : (csm.manager || 'N/A'),
+                    flm: csm.isFLM ? csm.person : 'N/A',
+                    person: csm.person,
+                    role: csm.specialty || 'CSM',
+                    hierarchyName: csm.department || 'Customer Success',
+                    clientType: '',
+                    specialty: csm.specialty || '',
+                    level: csm.level || '',
+                    personType: 'CSM' // Add person type
+                });
+            });
+            
+            // If no accounts found, still add the CSM with a generic account
+            if (accounts.size === 0) {
+                allData.push({
+                    account: 'Unassigned',
+                    brand: 'CSM',
+                    slm: csm.isSLM ? csm.person : (csm.manager || 'N/A'),
+                    flm: csm.isFLM ? csm.person : 'N/A',
+                    person: csm.person,
+                    role: csm.specialty || 'CSM',
+                    hierarchyName: csm.department || 'Customer Success',
+                    clientType: '',
+                    specialty: csm.specialty || '',
+                    level: csm.level || '',
+                    personType: 'CSM'
+                });
+            }
+        });
+        
+        this.logDebug(`Added ${ceData.length} CE records and ${csmData.length} CSM records to allData`);
     },
 
     /**

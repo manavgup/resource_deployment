@@ -5,6 +5,7 @@
 const dataService = {
     // Raw data storage
     rawData: [],
+    quotaData: [], // Raw quota data from QUOTA sheet
 
     // Processed data
     accountCounts: {}, // Raw row counts per account
@@ -13,13 +14,15 @@ const dataService = {
     brandFTEByAccount: {}, // FTE sum per brand within account
     accountUniquePeopleCount: {}, // Count of unique people per account
     personAllocations: {},
+    hasQuotaData: false, // Flag to indicate if quota data is available
 
     // Filter options
     filterOptions: {
         brands: [],
         accounts: [],
         slms: [],
-        flms: []
+        flms: [],
+        personTypes: [] // New filter for CE/CSM person types
     },
 
     /**
@@ -35,13 +38,44 @@ const dataService = {
         return excelParser.parseExcelFile(file)
             .then(data => {
                 console.log(`[LOG] excelParser.parseExcelFile promise resolved. Loaded ${data.length} raw records.`); // Added Log
+                
+                // Check if quota data is available
+                if (data.quotaData && Array.isArray(data.quotaData) && data.quotaData.length > 0) {
+                    console.log(`[LOG] Quota data found with ${data.quotaData.length} records.`);
+                    this.quotaData = data.quotaData;
+                    this.hasQuotaData = true;
+                    
+                    // Remove quotaData from the main data array to avoid processing it as regular data
+                    delete data.quotaData;
+                } else {
+                    console.log(`[LOG] No quota data found.`);
+                    this.quotaData = [];
+                    this.hasQuotaData = false;
+                }
+                
                 this.rawData = data;
+
+                // Filter quota data to exclude accounts not in rawData
+                if (this.hasQuotaData && this.rawData.length > 0) {
+                    console.log("[LOG] Filtering quota data based on accounts in rawData...");
+                    const accountsInRawData = new Set(this.rawData.map(item => item.account).filter(account => account && account !== 'N/A'));
+                    const originalQuotaCount = this.quotaData.length;
+                    this.quotaData = this.quotaData.filter(item => accountsInRawData.has(item.territoryTypeName));
+                    console.log(`[LOG] Filtered quota data: ${originalQuotaCount} original records, ${this.quotaData.length} remaining.`);
+                }
+
 
                 // Process the data
                 console.log("[LOG] Calling dataService.processData..."); // Added Log
                 this.processData();
                 console.log(`[LOG] dataService.processData finished. Processed data into ${Object.keys(this.accountCounts).length} accounts`); // Added Log
 
+                // Process quota data if available
+                if (this.hasQuotaData) {
+                    console.log("[LOG] Calling dataService.processQuotaData...");
+                    this.processQuotaData();
+                    console.log("[LOG] dataService.processQuotaData finished.");
+                }
 
                 // Extract filter options
                 console.log("[LOG] Calling dataService.extractFilterOptions..."); // Added Log
@@ -74,6 +108,20 @@ const dataService = {
          }
  
          try {
+             // Check if quota data is available in the JSON data
+             if (jsonData.quotaData && Array.isArray(jsonData.quotaData) && jsonData.quotaData.length > 0) {
+                 console.log(`[LOG] Quota data found in JSON with ${jsonData.quotaData.length} records.`);
+                 this.quotaData = jsonData.quotaData;
+                 this.hasQuotaData = true;
+                 
+                 // Remove quotaData from the main data array to avoid processing it as regular data
+                 delete jsonData.quotaData;
+             } else {
+                 console.log(`[LOG] No quota data found in JSON.`);
+                 this.quotaData = [];
+                 this.hasQuotaData = false;
+             }
+             
              // Set rawData
              this.rawData = jsonData;
              console.log(`[LOG] Set rawData from JSON.`);
@@ -82,6 +130,13 @@ const dataService = {
              console.log("[LOG] Calling dataService.processData from loadJsonData..."); // Added Log
              this.processData();
              console.log(`[LOG] dataService.processData finished. Processed data into ${Object.keys(this.accountCounts).length} accounts`); // Added Log
+ 
+             // Process quota data if available
+             if (this.hasQuotaData) {
+                 console.log("[LOG] Calling dataService.processQuotaData from loadJsonData...");
+                 this.processQuotaData();
+                 console.log("[LOG] dataService.processQuotaData finished.");
+             }
  
              // Extract filter options
              console.log("[LOG] Calling dataService.extractFilterOptions from loadJsonData..."); // Added Log
@@ -236,7 +291,8 @@ const dataService = {
             brands: [],
             accounts: [],
             slms: [],
-            flms: []
+            flms: [],
+            personTypes: [] // New filter for CE/CSM person types
         };
 
         // Create sets for unique values
@@ -244,6 +300,7 @@ const dataService = {
         const accounts = new Set();
         const slms = new Set();
         const flms = new Set();
+        const personTypes = new Set();
 
         // Extract unique values
         console.log("[LOG] Extracting unique filter values..."); // Added Log
@@ -254,17 +311,22 @@ const dataService = {
             // Only add non-empty strings
             if (item.slm && typeof item.slm === 'string' && item.slm.trim() !== '') slms.add(item.slm.trim());
             if (item.flm && typeof item.flm === 'string' && item.flm.trim() !== '') flms.add(item.flm.trim());
+            
+            // Add person type if available
+            if (item.personType && typeof item.personType === 'string' && item.personType.trim() !== '') {
+                personTypes.add(item.personType.trim());
+            }
         });
         console.log("[LOG] Unique filter values extracted."); // Added Log
-
 
         // Convert sets to sorted arrays
         this.filterOptions.brands = Array.from(brands).sort();
         this.filterOptions.accounts = Array.from(accounts).sort();
         this.filterOptions.slms = Array.from(slms).sort();
         this.filterOptions.flms = Array.from(flms).sort();
+        this.filterOptions.personTypes = Array.from(personTypes).sort();
 
-        this.logDebug(`Extracted filter options: ${this.filterOptions.brands.length} brands, ${this.filterOptions.accounts.length} accounts, ${this.filterOptions.slms.length} SLMs, ${this.filterOptions.flms.length} FLMs`); // Added detailed log
+        this.logDebug(`Extracted filter options: ${this.filterOptions.brands.length} brands, ${this.filterOptions.accounts.length} accounts, ${this.filterOptions.slms.length} SLMs, ${this.filterOptions.flms.length} FLMs, ${this.filterOptions.personTypes.length} person types`); // Added detailed log
 
         console.log("[LOG] Exiting dataService.extractFilterOptions"); // Added Log
     },
@@ -323,7 +385,6 @@ const dataService = {
                  return false; // Default exclusion if none of above match
             }
 
-
             // FLM filter (handle empty strings consistently)
              if (filters.flm && (item.flm || '').trim() !== filters.flm.trim()) {
                  // Special case: If filter is for "All FLMs" (empty string), this condition should be true, but the initial check 'filters.flm' prevents this.
@@ -335,9 +396,23 @@ const dataService = {
                  return false; // Default exclusion if none of above match
             }
 
+            // Person filter - check both name and specialty/role
+            if (filters.person) {
+                const searchTerm = filters.person.toLowerCase();
+                const personName = (item.person || '').toLowerCase();
+                const specialty = (item.specialty || '').toLowerCase();
+                const role = (item.role || '').toLowerCase();
+                
+                // Check if search term is in person name, specialty, or role
+                if (!personName.includes(searchTerm) && 
+                    !specialty.includes(searchTerm) && 
+                    !role.includes(searchTerm)) {
+                    return false;
+                }
+            }
 
-            // Person filter
-            if (filters.person && !item.person.toLowerCase().includes(filters.person.toLowerCase())) {
+            // Person Type filter (if we add this in the future)
+            if (filters.personType && item.personType !== filters.personType) {
                 return false;
             }
 
@@ -399,6 +474,19 @@ const dataService = {
                 result.allocation = this.personAllocations[item.person];
             }
 
+            // Add quota percentage if quota data is available
+            if (this.hasQuotaData) {
+                const personQuota = this.getQuotaForPerson(item.person);
+                const allocation = this.personAllocations[item.person];
+                const allocatedQuota = personQuota * allocation;
+                
+                // Calculate the percentage of the person's total quota allocated to this account
+                result.quotaPercentage = personQuota > 0 ? (allocatedQuota / personQuota) * 100 : 0;
+                
+                // Also store the allocated quota amount for reference
+                result.allocatedQuota = allocatedQuota;
+            }
+
             return result;
         });
          console.log(`[LOG] Prepared ${peopleList.length} people entries for account details.`); // Added Log
@@ -414,12 +502,29 @@ const dataService = {
              console.log(`[LOG] Total FTE for ${accountName}: ${totalFTE.toFixed(2)}`); // Added Log
         }
 
+        // Get quota information if available
+        let quotaInfo = {};
+        if (this.hasQuotaData) {
+            console.log("[LOG] Getting quota information for account details...");
+            quotaInfo = {
+                total_quota: this.getQuotaForAccount(accountName),
+                flm_breakdown: this.getQuotaBreakdownByFLMForAccount(accountName),
+                slm_breakdown: this.getQuotaBreakdownBySLMForAccount(accountName),
+                brand_breakdown: this.getQuotaBreakdownByBrandForAccount(accountName),
+                team_breakdown: this.getQuotaBreakdownByTeamForAccount(accountName)
+            };
+            console.log("[LOG] Quota information retrieved for account details.");
+        console.log("[LOG] Team breakdown quota data:", quotaInfo.team_breakdown);
+        }
+
         const result = {
             account: accountName,
             total_people: accountData.length,
             total_fte: totalFTE,
             brand_breakdown: brandBreakdown,
-            people: peopleList
+            people: peopleList,
+            has_quota: this.hasQuotaData,
+            quota: quotaInfo
         };
 
         console.log(`[LOG] Exiting dataService.getAccountDetails for account: ${accountName}`); // Added Log
@@ -589,6 +694,153 @@ const dataService = {
          return result;
     },
 
+    /**
+     * Process quota data and initialize quotaService
+     */
+    processQuotaData: function() {
+        console.log("[LOG] Entering dataService.processQuotaData");
+        
+        if (!this.hasQuotaData || !this.quotaData || this.quotaData.length === 0) {
+            console.log("[LOG] No quota data to process.");
+            return;
+        }
+        
+        console.log(`[LOG] Processing ${this.quotaData.length} quota records.`);
+        
+        // Initialize quotaService with the quota data and deployment data
+        quotaService.initializeQuotaData(this.quotaData, this.rawData);
+        
+        console.log("[LOG] Exiting dataService.processQuotaData");
+    },
+    
+    /**
+     * Get quota for a specific person
+     * @param {string} personName - Person name
+     * @returns {number} Quota value (or 0 if not found or quota data not available)
+     */
+    getQuotaForPerson: function(personName) {
+        if (!this.hasQuotaData) return 0;
+        return quotaService.getQuotaForPerson(personName);
+    },
+    
+    /**
+     * Get quota for a specific account
+     * @param {string} accountName - Account name
+     * @returns {number} Quota value (or 0 if not found or quota data not available)
+     */
+    getQuotaForAccount: function(accountName) {
+        if (!this.hasQuotaData) return 0;
+        return quotaService.getQuotaForAccount(accountName);
+    },
+    
+    /**
+     * Get quota breakdown by FLM for a specific account
+     * @param {string} accountName - Account name
+     * @returns {Object} Map of FLM names to quota values for the account
+     */
+    getQuotaBreakdownByFLMForAccount: function(accountName) {
+        if (!this.hasQuotaData) return {};
+        return quotaService.getQuotaBreakdownByFLMForAccount(accountName, this.rawData);
+    },
+    
+    /**
+     * Get quota breakdown by SLM for a specific account
+     * @param {string} accountName - Account name
+     * @returns {Object} Map of SLM names to quota values for the account
+     */
+    getQuotaBreakdownBySLMForAccount: function(accountName) {
+        if (!this.hasQuotaData) return {};
+        return quotaService.getQuotaBreakdownBySLMForAccount(accountName, this.rawData);
+    },
+    
+    /**
+     * Get quota breakdown by brand for a specific account
+     * @param {string} accountName - Account name
+     * @returns {Object} Map of brand names to quota values for the account
+     */
+    getQuotaBreakdownByBrandForAccount: function(accountName) {
+        if (!this.hasQuotaData) return {};
+        return quotaService.getQuotaBreakdownByBrandForAccount(accountName, this.rawData);
+    },
+    
+    /**
+     * Get quota breakdown by team for a specific account
+     * @param {string} accountName - Account name
+     * @returns {Object} Map of team names to quota values for the account
+     */
+    getQuotaBreakdownByTeamForAccount: function(accountName) {
+        if (!this.hasQuotaData) return {};
+        return quotaService.getQuotaBreakdownByTeamForAccount(accountName, this.rawData);
+    },
+    
+    /**
+     * Get all team quotas
+     * @returns {Object} Map of team names to quota values
+     */
+    getAllTeamQuotas: function() {
+        return this.teamQuotas;
+    },
+    
+    /**
+     * Check if quota data is available
+     * @returns {boolean} True if quota data is available, false otherwise
+     */
+    hasQuota: function() {
+        return this.hasQuotaData;
+    },
+    
+    /**
+     * Get person details including accounts and quota allocation
+     * @param {string} personName - Person name
+     * @returns {Object} Person details with accounts and quota allocation
+     */
+    getPersonDetails: function(personName) {
+        console.log(`[LOG] Entering dataService.getPersonDetails for person: ${personName}`);
+        
+        // Filter data for the specific person
+        const personData = this.rawData.filter(item => item.person === personName);
+        console.log(`[LOG] Found ${personData.length} raw records for person: ${personName}`);
+        
+        if (personData.length === 0) {
+            console.log(`[LOG] No data found for person: ${personName}`);
+            return {
+                person: personName,
+                accounts: []
+            };
+        }
+        
+        // Get unique accounts this person is deployed on
+        const uniqueAccounts = [...new Set(personData.map(item => item.account))];
+        console.log(`[LOG] Person ${personName} is deployed on ${uniqueAccounts.length} unique accounts`);
+        
+        // Get the person's total quota
+        const totalQuota = this.getQuotaForPerson(personName);
+        console.log(`[LOG] Total quota for ${personName}: ${totalQuota}`);
+        
+        // Calculate allocation and quota for each account
+        const accountsList = uniqueAccounts.map(account => {
+            const allocation = this.personAllocations[personName];
+            const allocatedQuota = totalQuota * allocation;
+            const quotaPercentage = totalQuota > 0 ? (allocatedQuota / totalQuota) * 100 : 0;
+            
+            return {
+                account: account,
+                allocation: allocation,
+                allocatedQuota: allocatedQuota,
+                quotaPercentage: quotaPercentage
+            };
+        });
+        
+        const result = {
+            person: personName,
+            totalQuota: totalQuota,
+            accounts: accountsList
+        };
+        
+        console.log(`[LOG] Exiting dataService.getPersonDetails for person: ${personName}`);
+        return result;
+    },
+    
     /**
      * Log debug information if debug mode is enabled
      * @param {string} message - Debug message
